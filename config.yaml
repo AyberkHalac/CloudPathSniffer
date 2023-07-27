@@ -1,0 +1,23 @@
+# AWS Credentials
+aws_profile_name: default
+aws_access_key_id:
+aws_secret_access_key:
+aws_session_token:
+
+
+# Bucket Name of CloudTrail Service
+bucket_name: credcollector
+
+
+# How many days do you want to go back
+all_temporary_credentials:
+  days: 1
+  hours: 0
+  minutes: 0
+
+
+# Neo4j database connection
+neo4j_connection_configurations:
+  username: neo4j
+  password: neo4j1337
+  database_uri: bolt://localhost:7687
