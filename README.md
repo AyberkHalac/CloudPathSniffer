@@ -6,8 +6,7 @@ One of the biggest issue of AWS is that assumed credentials are hidden from view
 
 ##  Installation
 
-First of all run Neo4j:
-For installation : https://neo4j.com/docs/operations-manual/current/installation/
+Install Neo4j Database : https://neo4j.com/docs/operations-manual/current/installation/
 
 ```sh
 pip3 install -r requirements.txt
