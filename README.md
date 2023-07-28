@@ -71,4 +71,9 @@ python3 credential_mapper.py
 ```
 
 Output Examples:
+![graph](https://github.com/AyberkHalac/AWSCredentialMapper/assets/9082447/6b781bbb-a7b1-41ba-9687-468822ef16f6)
+![Screenshot](https://github.com/AyberkHalac/AWSCredentialMapper/assets/9082447/99b33a91-0a5d-4476-8c0a-2ba0d9b086cc)
+![Screenshot](https://github.com/AyberkHalac/AWSCredentialMapper/assets/9082447/2fc4f6c2-d47a-4c09-8cc1-d395f35dab0f)
+![Screenshot](https://github.com/AyberkHalac/AWSCredentialMapper/assets/9082447/7295611a-79b8-4e60-a3b9-1f271ee90595)
+![Screenshot](https://github.com/AyberkHalac/AWSCredentialMapper/assets/9082447/604510ed-35cb-4efe-949d-c5647d9f5c31)
 
