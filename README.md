@@ -11,6 +11,8 @@ Install Neo4j Database : https://neo4j.com/docs/operations-manual/current/instal
 ```sh
 pip3 install -r requirements.txt
 ```
+## How to configure config.yaml ?
+
 
 ## How to run ?
 
