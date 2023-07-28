@@ -77,13 +77,13 @@ class CredentialMapper:
             dict_writer.writeheader()
             dict_writer.writerows(dict_list)
 
-    def get_access_key_of_user(self, username):
+    def get_access_key_of_user(self, userName):
         access_keys = []
 
         try:
             iam_client = self.session.client('iam')
             paginator = iam_client.get_paginator('list_access_keys')
-            response_iterator = paginator.paginate(UserName=username, PaginationConfig={'PageSize': 50})
+            response_iterator = paginator.paginate(UserName=userName, PaginationConfig={'PageSize': 50})
             for iteration_page in response_iterator:
                 for access_key in iteration_page['AccessKeyMetadata']:
                     access_keys.append(access_key)
@@ -107,10 +107,10 @@ class CredentialMapper:
             logger.critical(e)
             raise
 
-    def get_user(self, username):
+    def get_user(self, userName):
         try:
             iam_client = self.session.client('iam')
-            user = iam_client.get_user(UserName=username)
+            user = iam_client.get_user(UserName=userName)
             return user['User']
         except ClientError as err:
             logger.critical(err)
@@ -121,8 +121,8 @@ class CredentialMapper:
             long_term_credentials = []
             users = self.list_users()
             for user in users:
-                username = user['UserName']
-                access_keys = self.get_access_key_of_user(username)
+                userName = user['UserName']
+                access_keys = self.get_access_key_of_user(userName)
                 for access_key in access_keys:
                     long_term_credentials.append({'username': access_key['UserName'],
                                                   'access_key_id': access_key['AccessKeyId'],
@@ -137,20 +137,21 @@ class CredentialMapper:
             logger.critical(e)
             return False
 
-    def get_credentials(self):
+    def get_all_generated_credentials(self):
 
-        def check_long_term_access_key_status(username, access_key):
+        def check_long_term_access_key_status(userName, accessKey):
             status = 'deleted'
-            access_keys = self.get_access_key_of_user(username)
-            for key in access_keys:
-                if key['AccessKeyId'] == access_key:
+            accessKeys = self.get_access_key_of_user(userName)
+            for key in accessKeys:
+                if key['AccessKeyId'] == accessKey:
                     status = key['Status']
                     break
             return status
 
         try:
+            added_users = {}
             all_temporary_credentials = []
-
+            logger.debug("[+] Start gathering information from Athena.")
             start_time = datetime.utcnow() - timedelta(days=self.all_temporary_credentials_timespan['days'], hours=self.all_temporary_credentials_timespan['hours'], minutes=self.all_temporary_credentials_timespan['minutes'])
             datetime_object = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S.%f").strftime("%Y-%m-%dT%H:%M:%SZ")
             sql_query = """SELECT  
@@ -209,6 +210,7 @@ class CredentialMapper:
                         NextToken=response['NextToken']
                     )
 
+                logger.debug("[+] Start parsing the data")
                 for trail in response['ResultSet']['Rows']:
                     if first:
                         first = False
@@ -229,13 +231,13 @@ class CredentialMapper:
                     }
                     user_identity = json.loads(data['user_identity'])
                     user_identity_type = user_identity['type']
-                    user_identity_principalid = user_identity['principalid']
-                    user_identity_arn = user_identity['arn']
+                    # user_identity_principalid = user_identity['principalid']
+                    # user_identity_arn = user_identity['arn']
                     user_identity_accountid = user_identity['accountid']
                     user_identity_invokedby = user_identity['invokedby']
                     user_identity_accesskeyid = user_identity['accesskeyid']
                     user_identity_username = user_identity['username']
-                    user_identity_sessioncontext = user_identity['sessioncontext']
+                    # user_identity_sessioncontext = user_identity['sessioncontext']
 
                     if user_identity_type == 'IAMUser':
                         requesters_identity = user_identity_accesskeyid
@@ -294,22 +296,50 @@ class CredentialMapper:
                     else:
                         created_access_key = json.loads(data['created_access_key'])
                         timestamp = datetime.strptime(data['event_time'], '%Y-%m-%dT%H:%M:%SZ').strftime('%b %d, %Y, %I:%M:%S %p')
+                        user = self.get_user(created_access_key['userName'])
                         all_temporary_credentials.append({'user_identity_type': user_identity_type,
                                                           'requesters_identity': requesters_identity,
                                                           'access_key_id': created_access_key['accessKeyId'],
                                                           'requested_for': created_access_key['userName'],
+                                                          'requested_users_arn': user['Arn'],
+                                                          'requested_users_id': user['UserId'],
                                                           'event_time': timestamp,
                                                           'source_ip_address': data['source_ip_address'],
                                                           'is_active': check_long_term_access_key_status(created_access_key['userName'], created_access_key['accessKeyId']),
                                                           'event_id': data['event_id'],
                                                           'event_name': data['event_name']
                                                           })
-
+                        if created_access_key['userName'] not in added_users:
+                            added_users[created_access_key['userName']] = []
+                        added_users[created_access_key['userName']].append(created_access_key['accessKeyId'])
+                logger.debug("[+] Parse is finished.")
                 if 'NextToken' in response:
                     is_truncated = True
                 else:
                     is_truncated = False
-
+            logger.debug("[+] Athena task is finished.")
+            logger.debug("[+] Starting to parse absent access keys.")
+            users = self.list_users()
+            for user in users:
+                access_keys = self.get_access_key_of_user(user['UserName'])
+                for access_key in access_keys:
+                    if user['UserName'] not in added_users or access_key not in added_users[user['UserName']]:
+                        all_temporary_credentials.append({'user_identity_type': 'Unknown',
+                                                          'requesters_identity': 'Unknown',
+                                                          'access_key_id': access_key['AccessKeyId'],
+                                                          'requested_for': user['UserName'],
+                                                          'requested_users_arn': user['Arn'],
+                                                          'requested_users_id': user['UserId'],
+                                                          'event_time': access_key['CreateDate'].strftime('%b %d, %Y, %I:%M:%S %p'),
+                                                          'source_ip_address': None,
+                                                          'is_active': access_key['Status'],
+                                                          'event_id': None,
+                                                          'event_name': 'CreateAccessKey'
+                                                          })
+                        if user['UserName'] not in added_users:
+                            added_users[user['UserName']] = []
+                        added_users[user['UserName']].append(access_key)
+            logger.debug("[+] Parsing of the absent access keys task is finished.")
         except ClientError as err:
             logger.critical(err)
             raise
@@ -329,5 +359,5 @@ if __name__ == "__main__":
     greeter = Neo4jDatabase(database_uri, username, password)
     greeter.neo4j_delete_all()
     cred_mapper = CredentialMapper()
-    credentials = cred_mapper.get_credentials()
+    credentials = cred_mapper.get_all_generated_credentials()
     greeter.neo4j_bulk_add_credentials(credentials)

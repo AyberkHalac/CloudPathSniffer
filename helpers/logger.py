@@ -18,7 +18,7 @@ def setup_logger(logger_name, filename):
     screen_handler = logging.StreamHandler(stream=sys.stdout)
     screen_handler.setFormatter(formatter)
     __logger = logging.getLogger(logger_name)
-    __logger.setLevel(logging.CRITICAL)
+    __logger.setLevel(logging.ERROR)
     __logger.addHandler(handler)
     __logger.addHandler(screen_handler)
     return __logger

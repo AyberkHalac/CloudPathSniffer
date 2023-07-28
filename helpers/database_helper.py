@@ -31,37 +31,33 @@ class Neo4jDatabase:
         for credential_relationship in credentials:
 
             if credential_relationship['event_name'] == 'CreateAccessKey':
-                credential_start_node = is_node_exist(identity=credential_relationship['requesters_identity'])
-                if credential_start_node is False:
-                    credential_start_node = Node(credential_relationship['user_identity_type'],
-                                                 user_identity_type=credential_relationship['user_identity_type'],
-                                                 identity=credential_relationship['requesters_identity'])
-                    self.graph.create(credential_start_node)
-
                 credential_center_node = is_node_exist(identity=credential_relationship['requested_for'])
                 if credential_center_node is False:
                     credential_center_node = Node('IAMUser',
                                                   user_identity_type='IAMUser',
-                                                  identity=credential_relationship['requested_for'])
+                                                  identity=credential_relationship['requested_for'],
+                                                  user_arn=credential_relationship['requested_users_arn'],
+                                                  user_id=credential_relationship['requested_users_id']
+                                                  )
                     self.graph.create(credential_center_node)
 
                 credential_end_node = is_node_exist(identity=credential_relationship['access_key_id'])
                 if credential_end_node is False:
-                    credential_end_node = Node('AccessKey',
-                                               user_identity_type='AccessKey',
+                    credential_end_node = Node('IAMAccessKeyId',
+                                               user_identity_type='IAMAccessKeyId',
                                                identity=credential_relationship['access_key_id'],
                                                is_active=credential_relationship['is_active'])
                     self.graph.create(credential_end_node)
-
-                self.graph.create(Relationship(credential_start_node,
-                                               'RequestsBehalf',
-                                               credential_center_node,
-                                               source_ip_address=credential_relationship['source_ip_address'],
-                                               event_id=credential_relationship['event_id'],
-                                               event_name=credential_relationship['event_name'],
-                                               event_time=credential_relationship['event_time']
-                                               )
-                                  )
+                else:
+                    try:
+                        credential_end_node.add_label('IAMAccessKeyId')
+                        credential_end_node.remove_label('IAMUser')
+                    except ValueError as vErr:
+                        logger.error(str(vErr))
+                        pass
+                    credential_end_node['is_active'] = credential_relationship['is_active']
+                    credential_end_node['user_identity_type'] = 'IAMAccessKeyId'
+                    self.graph.push(credential_end_node)
 
                 self.graph.create(Relationship(credential_center_node,
                                                credential_relationship['event_name'],
@@ -72,6 +68,25 @@ class Neo4jDatabase:
                                                event_time=credential_relationship['event_time']
                                                )
                                   )
+
+                if credential_relationship['requesters_identity'] != 'Unknown':
+
+                    credential_start_node = is_node_exist(identity=credential_relationship['requesters_identity'])
+                    if credential_start_node is False:
+                        credential_start_node = Node(credential_relationship['user_identity_type'],
+                                                     user_identity_type=credential_relationship['user_identity_type'],
+                                                     identity=credential_relationship['requesters_identity'])
+                        self.graph.create(credential_start_node)
+
+                    self.graph.create(Relationship(credential_start_node,
+                                                   'RequestsBehalf',
+                                                   credential_center_node,
+                                                   source_ip_address=credential_relationship['source_ip_address'],
+                                                   event_id=credential_relationship['event_id'],
+                                                   event_name=credential_relationship['event_name'],
+                                                   event_time=credential_relationship['event_time']
+                                                   )
+                                      )
 
             else:
                 credential_start_node = is_node_exist(identity=credential_relationship['requesters_identity'])
