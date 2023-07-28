@@ -1,7 +1,7 @@
 # AWSCredentialMapper
 
 
-One of the biggest issue of AWS is that assumed credentials are hidden from view. Attackers can simply stay inside your AWS system easily without cought. The Credential Mapper project integrates Cloudtrail data into Athena to generate pathways more quickly and efficiently. The project doesn't use CloudTrail logs and saved log files in v1.
+One of the biggest issue of AWS is that assumed credentials are hidden from view. Attackers can simply stay inside your AWS system easily without caught. The Credential Mapper project integrates Cloudtrail data into Athena to generate assume pathways more quickly and efficiently. The project doesn't use CloudTrail logs and saved log files in v1.
 
 
 ##  Installation
