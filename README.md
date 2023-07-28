@@ -11,6 +11,7 @@ One of the biggest issue of AWS is that assumed credentials are hidden from view
 
 ### TODO:
 - Develop frontend to visualise the credential path map. (For now, you can view your output only from Neo4j browser.) 
+- Add detection mechanism for Role Juggling Attack 
 
 ##  Installation
 
