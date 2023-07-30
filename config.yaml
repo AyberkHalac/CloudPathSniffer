@@ -11,7 +11,7 @@ bucket_name: credcollector
 
 # How many days do you want to go back
 all_temporary_credentials:
-  days: 1
+  days: 30
   hours: 0
   minutes: 0
 
