@@ -97,7 +97,7 @@ class Neo4jDatabase:
             else:
                 credential_start_node = is_node_exist(identity=credential_relationship['requesters_identity'])
                 if credential_start_node is False:
-                    credential_start_node = Node(credential_relationship['user_identity_type'],
+                    credential_start_node = Node('IAMAccessKeyId' if credential_relationship['requesters_identity'].startswith('AKIA') else credential_relationship['user_identity_type'],
                                                  user_identity_type=credential_relationship['user_identity_type'],
                                                  identity=credential_relationship['requesters_identity'])
                     self.graph.create(credential_start_node)

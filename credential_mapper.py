@@ -170,7 +170,7 @@ class CredentialMapper:
                                         errorcode is NULL
                                         and eventname IN ('GetSessionToken', 'AssumeRole', 'AssumeRoleWithWebIdentity', 'GetFederationToken', 'AssumeRoleWithSAML', 'CreateAccessKey')
                                         and eventtime > '{event_time}'
-                                        ORDER BY eventtime DESC""".format(event_time=datetime_object)
+                                        ORDER BY eventtime ASC""".format(event_time=datetime_object)
 
             query_response = self.athena_client.start_query_execution(QueryString=sql_query,
                                                                       ResultConfiguration={'OutputLocation': f's3://{self.config["bucket_name"]}/CredentialMapper/'},
