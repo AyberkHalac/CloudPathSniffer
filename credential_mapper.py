@@ -288,7 +288,7 @@ class CredentialMapper:
                                                           'assumed_role_arn': data['assumed_role_arn'].replace('"', ''),
                                                           'requested_role': requested_role,
                                                           'source_ip_address': data['source_ip_address'],
-                                                          'is_active': 'Active' if is_active else 'Inactive',
+                                                          'is_active': 'Active' if is_active else 'Expired',
                                                           'event_id': data['event_id'],
                                                           'event_name': data['event_name']
                                                           })

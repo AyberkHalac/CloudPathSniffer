@@ -1,5 +1,6 @@
 import os
 
+from neo4j import GraphDatabase
 from py2neo import Graph, NodeMatcher, Node, Relationship
 
 from helpers.logger import setup_logger
@@ -12,8 +13,9 @@ logger = setup_logger(logger_name='database_helper', filename=LOG_FILE_PATH)
 
 class Neo4jDatabase:
 
-    def __init__(self, uri, user, password):
-        self.graph = Graph(uri, auth=(user, password))
+    def __init__(self, uri, username, password):
+        self.graph = Graph(uri, auth=(username, password))
+        self.driver = GraphDatabase.driver(uri, auth=(username, password))
 
     def neo4j_delete_all(self):
         self.graph.delete_all()
@@ -41,6 +43,11 @@ class Neo4jDatabase:
                                                   )
                     self.graph.create(credential_center_node)
 
+                else:
+                    credential_center_node['user_id'] = credential_relationship['requested_users_id']
+                    credential_center_node['user_arn'] = credential_relationship['requested_users_arn']
+                    self.graph.push(credential_center_node)
+
                 credential_end_node = is_node_exist(identity=credential_relationship['access_key_id'])
                 if credential_end_node is False:
                     credential_end_node = Node('IAMAccessKeyId',
@@ -49,12 +56,7 @@ class Neo4jDatabase:
                                                is_active=credential_relationship['is_active'])
                     self.graph.create(credential_end_node)
                 else:
-                    try:
-                        credential_end_node.add_label('IAMAccessKeyId')
-                        credential_end_node.remove_label('IAMUser')
-                    except ValueError as vErr:
-                        logger.error(str(vErr))
-                        pass
+                    # Remove Label
                     credential_end_node['is_active'] = credential_relationship['is_active']
                     credential_end_node['user_identity_type'] = 'IAMAccessKeyId'
                     self.graph.push(credential_end_node)
@@ -77,6 +79,9 @@ class Neo4jDatabase:
                                                      user_identity_type=credential_relationship['user_identity_type'],
                                                      identity=credential_relationship['requesters_identity'])
                         self.graph.create(credential_start_node)
+                    else:
+                        credential_start_node['user_identity_type'] = credential_relationship['user_identity_type']
+                        self.graph.push(credential_start_node)
 
                     self.graph.create(Relationship(credential_start_node,
                                                    'RequestsBehalf',
@@ -88,6 +93,7 @@ class Neo4jDatabase:
                                                    )
                                       )
 
+            # ASSUME ROLE
             else:
                 credential_start_node = is_node_exist(identity=credential_relationship['requesters_identity'])
                 if credential_start_node is False:
@@ -95,6 +101,11 @@ class Neo4jDatabase:
                                                  user_identity_type=credential_relationship['user_identity_type'],
                                                  identity=credential_relationship['requesters_identity'])
                     self.graph.create(credential_start_node)
+
+                else:
+                    credential_start_node['user_identity_type'] = credential_relationship['user_identity_type']
+                    credential_start_node['identity'] = credential_relationship['requesters_identity']
+                    self.graph.push(credential_start_node)
 
                 credential_end_node = is_node_exist(identity=credential_relationship['access_key_id'])
                 if credential_end_node is False:
@@ -107,6 +118,14 @@ class Neo4jDatabase:
                                                user_identity_type="AssumedRole"
                                                )
                     self.graph.create(credential_end_node)
+
+                else:
+                    credential_end_node['expiration_time'] = credential_relationship['expiration_time']
+                    credential_end_node['assumed_role_arn'] = credential_relationship['assumed_role_arn']
+                    credential_end_node['requested_role'] = credential_relationship['requested_role']
+                    credential_end_node['is_active'] = credential_relationship['is_active']
+                    credential_end_node['user_identity_type'] = 'AssumedRole'
+                    self.graph.push(credential_end_node)
 
                 self.graph.create(Relationship(credential_start_node,
                                                credential_relationship['event_name'],
