@@ -170,7 +170,7 @@ class Neo4jDatabase:
                                             WHERE NOT EXISTS((child)-->())
                                                 and NOT EXISTS(()-->(parent))
                                                 and length(p)>6
-                                            RETURN p,child, length(p)
+                                            RETURN p, length(p)
                                             ORDER BY length(p) DESC
                                             LIMIT 20''')
         print(json.dumps(possible_role_juggling_paths, indent=4, default=str))
