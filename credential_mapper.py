@@ -357,7 +357,8 @@ if __name__ == "__main__":
     database_uri = config['database_uri']
 
     greeter = Neo4jDatabase(database_uri, username, password)
-    greeter.neo4j_delete_all()
-    cred_mapper = CredentialMapper()
-    credentials = cred_mapper.get_all_generated_credentials()
-    greeter.neo4j_bulk_add_credentials(credentials)
+    # greeter.neo4j_delete_all()
+    # cred_mapper = CredentialMapper()
+    # credentials = cred_mapper.get_all_generated_credentials()
+    # greeter.neo4j_bulk_add_credentials(credentials)
+    greeter.find_role_juggling_attack_paths()

@@ -1,3 +1,4 @@
+import json
 import os
 
 from neo4j import GraphDatabase
@@ -20,7 +21,7 @@ class Neo4jDatabase:
     def neo4j_delete_all(self):
         self.graph.delete_all()
 
-    def neo4j_bulk_add_credentials(self, credentials):
+    def bulk_add_credentials(self, credentials):
 
         def is_node_exist(identity):
             matcher = NodeMatcher(self.graph)
@@ -136,3 +137,41 @@ class Neo4jDatabase:
                                                event_time=credential_relationship['event_time']
                                                )
                                   )
+
+    def find_nodes_with_max_relationship(self, contains_service_accounts: False):
+        """
+        The nodes that have the most relationships are found using this method.
+        :param contains_service_accounts:
+        :return: Neo4j Nodes that has max relationship
+        """
+
+        if contains_service_accounts:
+            nodes_with_max_relationship = self.graph.evaluate('''MATCH (n)
+                                                    WITH n, SIZE([(n)-[]-() | 1]) AS numRelationships
+                                                    WHERE numRelationships > 20
+                                                    RETURN n, numRelationships
+                                                    ORDER BY numRelationships DESC
+                                                    LIMIT 50;''')
+        else:
+            nodes_with_max_relationship = self.graph.evaluate('''MATCH (n)
+                                                    WHERE NOT n.identity CONTAINS "amazonaws.com"
+                                                    WITH n, SIZE([(n)-[]-() | 1]) AS numRelationships
+                                                    WHERE numRelationships > 10
+                                                    RETURN n, numRelationships
+                                                    ORDER BY numRelationships DESC
+                                                    LIMIT 50;''')
+
+        print(json.dumps(nodes_with_max_relationship, indent=4, default=str))
+        return nodes_with_max_relationship
+
+    def find_role_juggling_attack_paths(self):
+        # This query gives the longest unique paths
+        possible_role_juggling_paths = self.graph.evaluate('''MATCH p=(parent)-[r*]->(child)
+                                            WHERE NOT EXISTS((child)-->())
+                                                and NOT EXISTS(()-->(parent))
+                                                and length(p)>6
+                                            RETURN p,child, length(p)
+                                            ORDER BY length(p) DESC
+                                            LIMIT 20''')
+        print(json.dumps(possible_role_juggling_paths, indent=4, default=str))
+        return possible_role_juggling_paths
