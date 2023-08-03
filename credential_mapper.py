@@ -116,6 +116,43 @@ class CredentialMapper:
             logger.critical(err)
             return False
 
+    def describe_instances(self):
+        instances = []
+        regions = []
+
+        try:
+            describe_regions_result = self.session.client('ec2').describe_regions()
+            for region in describe_regions_result['Regions']:
+                regions.append(region['RegionName'])
+        except Exception as e:
+            logger.error('Getting error while taking region names:' + str(e))
+            return []
+
+        for region in regions:
+            response = {}
+            is_truncated = False
+            try:
+                ec2_client = self.session.client(service_name='ec2', region_name=region)
+
+                while len(response.keys()) == 0 or is_truncated:
+                    if is_truncated is False:
+                        response = ec2_client.describe_instances(Filters=[{'Name': 'instance-state-name', 'Values': ['running']}])
+                    else:
+                        response = ec2_client.describe_instances(NextToken=response['NextToken'], Filters=[{'Name': 'instance-state-name', 'Values': ['running']}])
+
+                    for reservation in response['Reservations']:
+                        for instance in reservation['Instances']:
+                            if 'PublicIpAddress' in instance:
+                                instances.append({'InstanceId': instance['InstanceId'], 'PublicIpAddress': instance['PublicIpAddress']})
+
+                    is_truncated = True if 'NextToken' in response else False
+            except ClientError as err:
+                logger.error(err)
+            except Exception as e:
+                logger.error(e)
+
+        return instances
+
     def get_long_term_credentials(self):
         try:
             long_term_credentials = []
@@ -231,13 +268,14 @@ class CredentialMapper:
                     }
                     user_identity = json.loads(data['user_identity'])
                     user_identity_type = user_identity['type']
-                    # user_identity_principalid = user_identity['principalid']
+                    user_identity_principalid = user_identity['principalid']
                     # user_identity_arn = user_identity['arn']
                     user_identity_accountid = user_identity['accountid']
                     user_identity_invokedby = user_identity['invokedby']
                     user_identity_accesskeyid = user_identity['accesskeyid']
                     user_identity_username = user_identity['username']
                     # user_identity_sessioncontext = user_identity['sessioncontext']
+                    service_name = ""
 
                     if user_identity_type == 'IAMUser':
                         requesters_identity = user_identity_accesskeyid
@@ -281,7 +319,7 @@ class CredentialMapper:
 
                         timestamp = datetime.strptime(data['event_time'], '%Y-%m-%dT%H:%M:%SZ').strftime('%b %d, %Y, %I:%M:%S %p')
                         all_temporary_credentials.append({'user_identity_type': user_identity_type,
-                                                          'requesters_identity': requesters_identity,
+                                                          'requesters_identity': service_name + ':' + requesters_identity if service_name is not None and service_name != "" else requesters_identity,
                                                           'access_key_id': access_key_id.replace('"', ''),
                                                           'event_time': timestamp,
                                                           'expiration_time': expiration_time,
@@ -357,8 +395,7 @@ if __name__ == "__main__":
     database_uri = config['database_uri']
 
     greeter = Neo4jDatabase(database_uri, username, password)
-    # greeter.neo4j_delete_all()
-    # cred_mapper = CredentialMapper()
-    # credentials = cred_mapper.get_all_generated_credentials()
-    # greeter.neo4j_bulk_add_credentials(credentials)
-    greeter.find_role_juggling_attack_paths()
+    greeter.neo4j_delete_all()
+    cred_mapper = CredentialMapper()
+    credentials = cred_mapper.get_all_generated_credentials()
+    greeter.bulk_add_credentials(credentials)

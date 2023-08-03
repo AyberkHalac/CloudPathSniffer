@@ -1,4 +1,3 @@
-import json
 import os
 
 from neo4j import GraphDatabase
@@ -96,17 +95,35 @@ class Neo4jDatabase:
 
             # ASSUME ROLE
             else:
-                credential_start_node = is_node_exist(identity=credential_relationship['requesters_identity'])
-                if credential_start_node is False:
-                    credential_start_node = Node('IAMAccessKeyId' if credential_relationship['requesters_identity'].startswith('AKIA') else credential_relationship['user_identity_type'],
-                                                 user_identity_type=credential_relationship['user_identity_type'],
-                                                 identity=credential_relationship['requesters_identity'])
-                    self.graph.create(credential_start_node)
+                if ':' in credential_relationship['requesters_identity']:
+                    service_name = credential_relationship['requesters_identity'][:credential_relationship['requesters_identity'].index(':')]
+                    requesters_identity = credential_relationship['requesters_identity'][credential_relationship['requesters_identity'].index(':') + 1:]
+                    credential_start_node = is_node_exist(requesters_identity)
+                    if credential_start_node is False:
+                        credential_start_node = Node(credential_relationship['user_identity_type'],
+                                                     user_identity_type=credential_relationship['user_identity_type'],
+                                                     identity=requesters_identity,
+                                                     service_name=service_name)
+                        self.graph.create(credential_start_node)
+
+                    else:
+                        credential_start_node['user_identity_type'] = credential_relationship['user_identity_type']
+                        credential_start_node['identity'] = requesters_identity
+                        credential_start_node['service_name'] = service_name
+                        self.graph.push(credential_start_node)
 
                 else:
-                    credential_start_node['user_identity_type'] = credential_relationship['user_identity_type']
-                    credential_start_node['identity'] = credential_relationship['requesters_identity']
-                    self.graph.push(credential_start_node)
+                    credential_start_node = is_node_exist(identity=credential_relationship['requesters_identity'])
+                    if credential_start_node is False:
+                        credential_start_node = Node('IAMAccessKeyId' if credential_relationship['requesters_identity'].startswith('AKIA') else credential_relationship['user_identity_type'],
+                                                     user_identity_type=credential_relationship['user_identity_type'],
+                                                     identity=credential_relationship['requesters_identity'])
+                        self.graph.create(credential_start_node)
+
+                    else:
+                        credential_start_node['user_identity_type'] = credential_relationship['user_identity_type']
+                        credential_start_node['identity'] = credential_relationship['requesters_identity']
+                        self.graph.push(credential_start_node)
 
                 credential_end_node = is_node_exist(identity=credential_relationship['access_key_id'])
                 if credential_end_node is False:
@@ -161,10 +178,9 @@ class Neo4jDatabase:
                                                     ORDER BY numRelationships DESC
                                                     LIMIT 50;''')
 
-        print(json.dumps(nodes_with_max_relationship, indent=4, default=str))
         return nodes_with_max_relationship
 
-    def find_role_juggling_attack_paths(self):
+    def find_longest_uniq_paths(self):
         # This query gives the longest unique paths
         possible_role_juggling_paths = self.graph.evaluate('''MATCH p=(parent)-[r*]->(child)
                                             WHERE NOT EXISTS((child)-->())
@@ -173,5 +189,4 @@ class Neo4jDatabase:
                                             RETURN p, length(p)
                                             ORDER BY length(p) DESC
                                             LIMIT 20''')
-        print(json.dumps(possible_role_juggling_paths, indent=4, default=str))
         return possible_role_juggling_paths
