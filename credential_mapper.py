@@ -280,7 +280,11 @@ class CredentialMapper:
                     if user_identity_type == 'IAMUser':
                         requesters_identity = user_identity_accesskeyid
                     elif user_identity_type == 'AWSService':
-                        requesters_identity = user_identity_invokedby
+                        if user_identity_invokedby == 'ec2.amazonaws.com':
+                            requesters_identity = json.loads(data['request_parameters'])['roleSessionName']
+                            service_name = user_identity_invokedby
+                        else:
+                            requesters_identity = user_identity_invokedby
                     elif user_identity_type == 'AssumedRole':
                         requesters_identity = user_identity_accesskeyid
                     elif user_identity_type == 'SAMLUser':
