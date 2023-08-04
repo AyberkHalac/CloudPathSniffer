@@ -11,7 +11,8 @@ One of the biggest issue of AWS is that assumed credentials are hidden from view
 
 ### TODO:
 - Develop frontend to visualise the credential path map. (For now, you can view your output only from Neo4j browser.) 
-- Add detection mechanism for Role Juggling Attack 
+- Add detection mechanism for Role Juggling Attack
+- Multi region cloudtrail control for now its only for us-east-1. (The fact that IAM does not employ regions ensures that we never miss an IAM case. Exposed credential controls for EC2 are the only issue.)
 
 ##  Installation
 
