@@ -52,3 +52,128 @@ def heartbeat(aws_profile_name, aws_access_key_id, aws_secret_access_key, aws_se
     except Exception as e:
         logger.error(e)
         return False
+
+
+def describe_instances_all_regions(session):
+    instances = []
+    regions = []
+
+    try:
+        describe_regions_result = session.client('ec2').describe_regions()
+        for region in describe_regions_result['Regions']:
+            regions.append(region['RegionName'])
+    except Exception as e:
+        logger.error('Getting error while taking region names:' + str(e))
+        return []
+
+    for region in regions:
+        response = {}
+        is_truncated = False
+        try:
+            ec2_client = session
+
+            while len(response.keys()) == 0 or is_truncated:
+                if is_truncated is False:
+                    response = ec2_client.describe_instances(Filters=[{'Name': 'instance-state-name', 'Values': ['running']}])
+                else:
+                    response = ec2_client.describe_instances(NextToken=response['NextToken'], Filters=[{'Name': 'instance-state-name', 'Values': ['running']}])
+
+                for reservation in response['Reservations']:
+                    for instance in reservation['Instances']:
+                        if 'PublicIpAddress' in instance:
+                            instances.append({'InstanceId': instance['InstanceId'], 'PublicIpAddress': instance['PublicIpAddress']})
+
+                is_truncated = True if 'NextToken' in response else False
+        except Exception as e:
+            logger.error(e)
+
+    return instances
+
+
+def describe_instances(session, region='us-east-1'):
+    instances = []
+    response = {}
+    is_truncated = False
+    try:
+        ec2_client = session.client(service_name='ec2', region_name=region)
+
+        while len(response.keys()) == 0 or is_truncated:
+            if is_truncated is False:
+                response = ec2_client.describe_instances(Filters=[{'Name': 'instance-state-name', 'Values': ['running']}])
+            else:
+                response = ec2_client.describe_instances(NextToken=response['NextToken'], Filters=[{'Name': 'instance-state-name', 'Values': ['running']}])
+
+            for reservation in response['Reservations']:
+                for instance in reservation['Instances']:
+                    if 'PublicIpAddress' in instance:
+                        instances.append({'InstanceId': instance['InstanceId'], 'PublicIpAddress': instance['PublicIpAddress']})
+
+            is_truncated = True if 'NextToken' in response else False
+    except Exception as e:
+        logger.error(e)
+
+    return instances
+
+
+def get_access_key_of_user(session: boto3.Session, userName):
+    access_keys = []
+
+    try:
+        iam_client = session.client('iam')
+        paginator = iam_client.get_paginator('list_access_keys')
+        response_iterator = paginator.paginate(UserName=userName, PaginationConfig={'PageSize': 50})
+        for iteration_page in response_iterator:
+            for access_key in iteration_page['AccessKeyMetadata']:
+                access_keys.append(access_key)
+        return access_keys
+    except Exception as e:
+        logger.critical(e)
+        raise
+
+
+def list_users(session: boto3.Session):
+    users = []
+
+    try:
+        iam_client = session.client('iam')
+        paginator = iam_client.get_paginator('list_users')
+        response_iterator = paginator.paginate(PaginationConfig={'PageSize': 50})
+        for iteration_page in response_iterator:
+            for user in iteration_page['Users']:
+                users.append(user)
+        return users
+    except Exception as e:
+        logger.critical(e)
+        raise
+
+
+def get_user(session: boto3.Session, userName):
+    try:
+        iam_client = session.client('iam')
+        user = iam_client.get_user(UserName=userName)
+        return user['User']
+    except ClientError as err:
+        logger.critical(err)
+        return False
+
+
+def get_long_term_credentials(session: boto3.Session):
+    try:
+        long_term_credentials = []
+        users = list_users(session)
+        for user in users:
+            userName = user['UserName']
+            access_keys = get_access_key_of_user(session, userName)
+            for access_key in access_keys:
+                long_term_credentials.append({'username': access_key['UserName'],
+                                              'access_key_id': access_key['AccessKeyId'],
+                                              'is_active': access_key['Status'],
+                                              'create_date': access_key['CreateDate']
+                                              })
+        return long_term_credentials
+    except ClientError as err:
+        logger.critical(err)
+        return False
+    except Exception as e:
+        logger.critical(e)
+        return False

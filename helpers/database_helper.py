@@ -20,7 +20,7 @@ class Neo4jDatabase:
     def neo4j_delete_all(self):
         self.graph.delete_all()
 
-    def bulk_add_credentials(self, credentials):
+    def neo4j_bulk_add_credentials(self, credentials):
 
         def is_node_exist(identity):
             matcher = NodeMatcher(self.graph)
@@ -163,14 +163,14 @@ class Neo4jDatabase:
         """
 
         if contains_service_accounts:
-            nodes_with_max_relationship = self.graph.evaluate('''MATCH (n)
+            nodes_with_max_relationship = self.driver.session().run('''MATCH (n)
                                                     WITH n, SIZE([(n)-[]-() | 1]) AS numRelationships
                                                     WHERE numRelationships > 20
                                                     RETURN n, numRelationships
                                                     ORDER BY numRelationships DESC
                                                     LIMIT 50;''')
         else:
-            nodes_with_max_relationship = self.graph.evaluate('''MATCH (n)
+            nodes_with_max_relationship = self.driver.session().run('''MATCH (n)
                                                     WHERE NOT n.identity CONTAINS "amazonaws.com"
                                                     WITH n, SIZE([(n)-[]-() | 1]) AS numRelationships
                                                     WHERE numRelationships > 10
@@ -182,7 +182,7 @@ class Neo4jDatabase:
 
     def find_longest_uniq_paths(self):
         # This query gives the longest unique paths
-        possible_role_juggling_paths = self.graph.evaluate('''MATCH p=(parent)-[r*]->(child)
+        possible_role_juggling_paths = self.driver.session().run('''MATCH p=(parent)-[r*]->(child)
                                             WHERE NOT EXISTS((child)-->())
                                                 and NOT EXISTS(()-->(parent))
                                                 and length(p)>6
