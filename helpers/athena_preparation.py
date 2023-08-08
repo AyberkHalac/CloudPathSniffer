@@ -8,11 +8,10 @@ from helpers.logger import setup_logger
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE_PATH = os.path.join(os.path.join(ROOT_DIR, '..', 'logs'), 'CredentialMapper.log')
 
-
 logger = setup_logger(logger_name='athena_preparation', filename=LOG_FILE_PATH)
 
 
-def prepare_athena(athena_client, bucket_name):
+def prepare_athena(athena_client, bucket_name, account_id):
     try:
         athena_client.start_query_execution(
             QueryString='DROP TABLE CredentialMapper',
@@ -33,7 +32,11 @@ def prepare_athena(athena_client, bucket_name):
 
         athena_client.start_query_execution(
             QueryString='CREATE DATABASE CredentialMapper',
-            ResultConfiguration={'OutputLocation': f's3://{bucket_name}/CredentialMapper/'})
+            ResultConfiguration={'OutputLocation': f's3://{bucket_name}/CredentialMapper/'},
+            QueryExecutionContext={
+                'Database': 'CredentialMapper',
+            }
+        )
         time.sleep(5)
 
         query_response = athena_client.start_query_execution(
@@ -93,7 +96,7 @@ def prepare_athena(athena_client, bucket_name):
         ROW FORMAT SERDE 'org.apache.hive.hcatalog.data.JsonSerDe'
         STORED AS INPUTFORMAT 'com.amazon.emr.cloudtrail.CloudTrailInputFormat'
         OUTPUTFORMAT 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
-        LOCATION 's3://{bucket_name}/AWSLogs/568541058488/CloudTrail/'
+        LOCATION 's3://{bucket_name}/AWSLogs/{account_id}/CloudTrail/'
         TBLPROPERTIES ('classification'='cloudtrail');
             ''',
             ResultConfiguration={'OutputLocation': f's3://{bucket_name}/CredentialMapper/'},
@@ -108,7 +111,7 @@ def prepare_athena(athena_client, bucket_name):
         ready_state = query_response['QueryExecution']['Status']['State']
 
         timeout = 600
-        while ready_state != 'SUCCEEDED' and timeout > 0:
+        while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
             if ready_state == 'FAILED':
                 return False
             query_response = athena_client.get_query_execution(
@@ -135,7 +138,7 @@ def get_query_results(athena_client, query_execution_id):
     ready_state = query_response['QueryExecution']['Status']['State']
 
     timeout = 100
-    while ready_state != 'SUCCEEDED' and timeout > 0:
+    while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
         query_response = athena_client.get_query_execution(
             QueryExecutionId=query_execution_id
         )

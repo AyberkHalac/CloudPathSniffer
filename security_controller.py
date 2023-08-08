@@ -98,7 +98,7 @@ def check_exposed_ec2_temporary_credentials(session: boto3.Session, bucket_name,
             ready_state = query_response['QueryExecution']['Status']['State']
 
             timeout = 600
-            while ready_state != 'SUCCEEDED' and timeout > 0:
+            while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
                 query_response = athena_client.get_query_execution(
                     QueryExecutionId=query_execution_id
                 )
@@ -178,7 +178,7 @@ def check_exposed_ec2_temporary_credentials(session: boto3.Session, bucket_name,
             ready_state = query_response['QueryExecution']['Status']['State']
 
             timeout = 600
-            while ready_state != 'SUCCEEDED' and timeout > 0:
+            while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
                 query_response = athena_client.get_query_execution(
                     QueryExecutionId=query_execution_id
                 )
@@ -271,7 +271,7 @@ def check_exposed_ec2_temporary_credentials_with_aws_ips(session: boto3.Session,
         ready_state = query_response['QueryExecution']['Status']['State']
 
         timeout = 600
-        while ready_state != 'SUCCEEDED' and timeout > 0:
+        while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
             query_response = athena_client.get_query_execution(
                 QueryExecutionId=query_execution_id
             )
@@ -366,7 +366,7 @@ def check_logs_for_blacklisted_ip_accesses(session: boto3.Session, bucket_name, 
         ready_state = query_response['QueryExecution']['Status']['State']
 
         timeout = 600
-        while ready_state != 'SUCCEEDED' and timeout > 0:
+        while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
             query_response = athena_client.get_query_execution(
                 QueryExecutionId=query_execution_id
             )
@@ -421,7 +421,7 @@ def check_logs_for_blacklisted_ip_accesses(session: boto3.Session, bucket_name, 
     return blacklisted_trails
 
 
-def role_juggling_long_repeating_pattern(input_list):
+def role_juggling_long_repeating_pattern():
     """
     Example input output:
     I1 - [1,2,3,1,2,3,1,2,3]
@@ -444,8 +444,6 @@ def role_juggling_long_repeating_pattern(input_list):
     O1 - Longest repeating list: [] repeating element: [] start-end index:(0,0)  -> Because it repeats only 1 times
 
 
-
-    :param input_list:
     :return:
     """
 

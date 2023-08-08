@@ -6,7 +6,7 @@ aws_session_token:
 
 
 # Bucket Name of CloudTrail Service
-bucket_name: credcollector
+bucket_name: credentialcollector
 
 
 # How many days do you want to go back

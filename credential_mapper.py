@@ -9,6 +9,7 @@ from botocore.exceptions import ClientError
 from helpers.athena_preparation import prepare_athena
 from helpers.boto3_helpers import create_boto3_session, heartbeat, get_access_key_of_user, get_user, list_users
 from helpers.config_reader import get_config_file
+from helpers.database_helper import Neo4jDatabase
 from helpers.logger import setup_logger
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -44,9 +45,9 @@ class CredentialMapper:
             self.cloudtrail_client = self.session.client('cloudtrail')
             self.athena_client = self.session.client('athena')
             self.ec2_client = self.session.client('ec2')
-            prepare_athena(self.athena_client, self.config['bucket_name'])
+            prepare_athena(self.athena_client, self.config['bucket_name'], self.session.client('sts').get_caller_identity()['Account'])
         except Exception as e:
-            print(e)
+            print('[!] Error at starting credential mapper.')
             logger.critical(e)
             exit(1)
 
@@ -123,7 +124,7 @@ class CredentialMapper:
             ready_state = query_response['QueryExecution']['Status']['State']
 
             timeout = 600
-            while ready_state != 'SUCCEEDED' and timeout > 0:
+            while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
                 query_response = self.athena_client.get_query_execution(
                     QueryExecutionId=query_execution_id
                 )
@@ -170,7 +171,7 @@ class CredentialMapper:
                     }
                     user_identity = json.loads(data['user_identity'])
                     user_identity_type = user_identity['type']
-                    # user_identity_principalid = user_identity['principalid']
+                    user_identity_principalid = user_identity['principalid']
                     # user_identity_arn = user_identity['arn']
                     user_identity_accountid = user_identity['accountid']
                     user_identity_invokedby = user_identity['invokedby']
@@ -199,10 +200,12 @@ class CredentialMapper:
                         requesters_identity = user_identity_accountid
                     elif user_identity_type == 'WebIdentityUser':
                         requesters_identity = user_identity_username
+                    elif user_identity_type == 'FederatedUser':
+                        requesters_identity = user_identity_principalid[user_identity_principalid.find(':') + 1:]
                     elif user_identity_type == 'Root':
                         requesters_identity = 'Root'
                     else:
-                        requesters_identity = 'N/A'
+                        requesters_identity = user_identity
 
                     # TODO: Add absent identities
                     """ 
@@ -213,7 +216,7 @@ class CredentialMapper:
                     AWSService          +
                     IAMUser             +
                     Root                -
-                    FederatedUser       -
+                    FederatedUser       +
                     SAMLUser            +
                     Unknown             -
                     Role                -
@@ -225,15 +228,21 @@ class CredentialMapper:
                         access_key_id = data['access_key_id']
                         expiration_time = data['expiration_time'].replace('"', '')
                         is_active = self.is_long_term_credential_active(expiration_time)
-                        requested_role = json.loads(data['request_parameters'])['roleArn']
-
+                        requested_role = json.loads(data['request_parameters'])['roleArn'] if 'roleArn' in json.loads(data['request_parameters']) else json.loads(data['request_parameters'])['name']
+                        if data['event_name'] == 'GetFederationToken':
+                            assumed_role_arn = str(json.loads(data['request_parameters'])['policyArns'])
+                            requesters_identity = user_identity_accesskeyid
+                        else:
+                            assumed_role_arn = data['assumed_role_arn'].replace('"', '')
+                            if user_identity_type == 'FederatedUser':
+                                requesters_identity = service_name + ':' + requesters_identity
                         timestamp = datetime.strptime(data['event_time'], '%Y-%m-%dT%H:%M:%SZ').strftime('%b %d, %Y, %I:%M:%S %p')
                         all_temporary_credentials.append({'user_identity_type': user_identity_type,
-                                                          'requesters_identity': service_name + ':' + requesters_identity if service_name is not None and service_name != "" else requesters_identity,
+                                                          'requesters_identity': requesters_identity,
                                                           'access_key_id': access_key_id.replace('"', ''),
                                                           'event_time': timestamp,
                                                           'expiration_time': expiration_time,
-                                                          'assumed_role_arn': data['assumed_role_arn'].replace('"', ''),
+                                                          'assumed_role_arn': assumed_role_arn,
                                                           'requested_role': requested_role,
                                                           'source_ip_address': data['source_ip_address'],
                                                           'is_active': 'Active' if is_active else 'Expired',
@@ -288,11 +297,142 @@ class CredentialMapper:
                             added_users[user['UserName']] = []
                         added_users[user['UserName']].append(access_key)
             logger.debug("[+] Parsing of the absent access keys task is finished.")
+
+            return all_temporary_credentials
         except ClientError as err:
             logger.critical(err)
-            raise
+            print('[!] Exception while the running Athena.')
+            exit(1)
         except Exception as e:
             logger.critical(e)
-            raise
+            print('[!] Exception while the running Athena.')
+            exit(1)
 
-        return all_temporary_credentials
+    def check_console_login_of_iam_credentials(self):
+        """
+        https://github.com/Hacking-the-Cloud/hackingthe.cloud/blob/main/content/aws/post_exploitation/create_a_console_session_from_iam_credentials.md
+        This function checks if the attacker get console access via iam credentials.
+        This function is void and fills the neo4j database
+        """
+        try:
+            console_logins = []
+            config = get_config_file('./config.yaml')
+            all_temporary_credentials_timespan = config['all_temporary_credentials']
+        except Exception as e:
+            logger.critical('[!] Getting error reading config file', str(e))
+            return
+        start_time = datetime.utcnow() - timedelta(days=all_temporary_credentials_timespan['days'], hours=all_temporary_credentials_timespan['hours'], minutes=all_temporary_credentials_timespan['minutes'])
+        datetime_object = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S.%f").strftime("%Y-%m-%dT%H:%M:%SZ")
+        sql_query = """
+        SELECT  
+            cast(useridentity as json) as useridentity,
+            eventtime,
+            sourceipaddress,
+            eventid,
+            eventname
+        FROM CredentialMapper 
+            WHERE 
+                errorcode is NULL
+                and useridentity.type='FederatedUser'
+                and eventname = 'ConsoleLogin'
+                and eventtime > '2023-07-07T14:55:21Z'
+            ORDER BY eventtime ASC
+        """.format(event_time=datetime_object)
+
+        query_response = self.athena_client.start_query_execution(QueryString=sql_query,
+                                                                  ResultConfiguration={'OutputLocation': f's3://{self.config["bucket_name"]}/CredentialMapper/'},
+                                                                  QueryExecutionContext={'Database': 'CredentialMapper'}
+                                                                  )
+        query_execution_id = query_response['QueryExecutionId']
+
+        query_response = self.athena_client.get_query_execution(
+            QueryExecutionId=query_execution_id
+        )
+        ready_state = query_response['QueryExecution']['Status']['State']
+
+        timeout = 600
+        while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
+            query_response = self.athena_client.get_query_execution(
+                QueryExecutionId=query_execution_id
+            )
+            ready_state = query_response['QueryExecution']['Status']['State']
+            time.sleep(2)
+            timeout -= 2
+            if timeout <= 0:
+                raise ClientError
+
+        response = {}
+        is_truncated = False
+        first = True
+        while len(response.keys()) == 0 or is_truncated:
+            if is_truncated is False:
+                response = self.athena_client.get_query_results(
+                    QueryExecutionId=query_execution_id,
+                    MaxResults=50
+                )
+            else:
+                response = self.athena_client.get_query_results(
+                    QueryExecutionId=query_execution_id,
+                    MaxResults=50,
+                    NextToken=response['NextToken']
+                )
+
+            logger.debug("[+] Start parsing the data")
+            for trail in response['ResultSet']['Rows']:
+                if first:
+                    first = False
+                    continue
+
+                data = {
+                    'user_identity': trail['Data'][0]['VarCharValue'] if 'VarCharValue' in trail['Data'][0] else '',
+                    'event_time': trail['Data'][1]['VarCharValue'] if 'VarCharValue' in trail['Data'][1] else '',
+                    'source_ip_address': trail['Data'][2]['VarCharValue'] if 'VarCharValue' in trail['Data'][2] else '',
+                    'event_id': trail['Data'][3]['VarCharValue'] if 'VarCharValue' in trail['Data'][3] else '',
+                    'event_name': trail['Data'][4]['VarCharValue'] if 'VarCharValue' in trail['Data'][4] else '',
+
+                }
+                user_identity = json.loads(data['user_identity'])
+                user_identity_type = user_identity['type']
+                user_identity_principalid = user_identity['principalid']
+                user_identity_arn = user_identity['arn']
+                user_identity_accountid = user_identity['accountid']
+                user_identity_session_issuer = user_identity['sessioncontext']['sessionissuer']
+
+                if user_identity_session_issuer['type'] == "IAMUser":
+                    requesters_identity_type = user_identity_session_issuer['type']
+                    requesters_identity_principalid = user_identity_session_issuer['principalid']
+                    requesters_identity_arn = user_identity_session_issuer['arn']
+                    requesters_identity_username = user_identity_session_issuer['username']
+                else:  # TODO: Check other scenarios about this part
+                    requesters_identity_type = None
+                    requesters_identity_principalid = None
+                    requesters_identity_arn = None
+                    requesters_identity_username = None
+
+                timestamp = datetime.strptime(data['event_time'], '%Y-%m-%dT%H:%M:%SZ').strftime('%b %d, %Y, %I:%M:%S %p')
+                console_logins.append({
+                    'user_identity_type': user_identity_type,
+                    'user_identity_principalid': user_identity_principalid,
+                    'user_identity_arn': user_identity_arn,
+                    'user_identity_accountid': user_identity_accountid,
+                    'requesters_identity_type': requesters_identity_type,
+                    'requesters_identity_principalid': requesters_identity_principalid,
+                    'requesters_identity_arn': requesters_identity_arn,
+                    'requesters_identity_username': requesters_identity_username,
+                    'event_time': timestamp,
+                    'source_ip_address': data['source_ip_address'],
+                    'event_id': data['event_id'],
+                    'event_name': data['event_name']
+                })
+        return console_logins
+
+
+if __name__ == "__main__":
+    greeter = Neo4jDatabase()
+    greeter.neo4j_delete_all()
+    cred_mapper = CredentialMapper()
+    credentials = cred_mapper.get_all_generated_credentials()
+    greeter.neo4j_bulk_add_credentials(credentials)
+    console_logins = cred_mapper.check_console_login_of_iam_credentials()
+    if len(console_logins) > 0:
+        greeter.add_rel_as_console_login_of_iam_credentials(console_logins)

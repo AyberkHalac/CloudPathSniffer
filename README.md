@@ -1,19 +1,21 @@
 # AWSCredentialMapper
 
+One of the biggest issue of AWS is that assumed credentials are hidden from view. Attackers can simply stay inside your AWS system easily without caught. The Credential Mapper project integrates Cloudtrail data into Athena to generate assume pathways
+more quickly and efficiently. The project doesn't use CloudTrail logs and saved log files in v1.
 
-One of the biggest issue of AWS is that assumed credentials are hidden from view. Attackers can simply stay inside your AWS system easily without caught. The Credential Mapper project integrates Cloudtrail data into Athena to generate assume pathways more quickly and efficiently. The project doesn't use CloudTrail logs and saved log files in v1.
+### What can Credential Mapper do?
 
-###  What can Credential Mapper do?
 - Finds all active/expired temporary credentials
 - Finds all active/inactive/deleted access keys.
 - Extracts all parents and children of a credential and maps it using neo4j.
-- Finds anomalies in the log records, which includes the generation of temporary credentials and the creation of access keys. 
+- Finds anomalies in the log records, which includes the generation of temporary credentials and the creation of access keys.
 
 ### TODO:
-- Develop frontend to visualise the credential path map. (For now, you can view your output only from Neo4j browser.) 
-- Add detection mechanism for Role Juggling Attack 
 
-##  Installation
+- Develop frontend to visualise the credential path map. (For now, you can view your output only from Neo4j browser.)
+- Add detection mechanism for Role Juggling Attack
+
+## Installation
 
 Install Neo4j Database : https://neo4j.com/docs/operations-manual/current/installation/
 
@@ -22,6 +24,7 @@ pip3 install -r requirements.txt
 ```
 
 ## How to configure config.yaml ?
+
 ```
 # AWS Credentials
 aws_profile_name: {If you've already set up your profile in ~/.aws/credentials, type your profile name here.}
@@ -58,6 +61,7 @@ or neo4j console
 ```sh
 python3 credential_mapper.py
 ```
+
 ### Do you want to start ASAP?
 
 ```
