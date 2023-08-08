@@ -1,25 +1,45 @@
 # AWSCredentialMapper
 
-One of the biggest issue of AWS is that assumed credentials are hidden from view. Attackers can simply stay inside your AWS system easily without caught. The Credential Mapper project integrates Cloudtrail data into Athena to generate assume pathways
-more quickly and efficiently. The project doesn't use CloudTrail logs and saved log files in v1.
+<div align="center">
+ <a href="https://twitter.com/ayberkhalac">
+    <img src="https://img.shields.io/badge/License-MIT-green">
+ </a>
+ <a href="https://github.com/ayberkhalac/AWSCredentialMapper/issues">
+    <img src="https://img.shields.io/github/issues/ayberkhalac/AWSCredentialMapper">
+ </a>
+ <a href="https://github.com/ayberkhalac/AWSCredentialMapper">
+    <img src="https://img.shields.io/github/stars/ayberkhalac/AWSCredentialMapper?color=red&style=flat-square">
+ </a>
+</div>
 
-### What can Credential Mapper do?
+# Introduction
 
-- Finds all active/expired temporary credentials
-- Finds all active/inactive/deleted access keys.
-- Extracts all parents and children of a credential and maps it using neo4j.
+## Description
+
+An open source AWS defensive security tool
+
+The fact that temporary credentials are hidden from view is one of the most important AWS features that is lacking. You can only see them in cloudtrail logs and that is really hard to track even with complicated SIEM's. AWS Credential Manager not only tracks the temporary credentials, It can finds the abused vulnerabilities from your logs and maps them to the Neo4j database with your credentials.
+
+Attackers can simply stay inside your AWS system easily without caught. The Credential Mapper project integrates Cloudtrail data into Athena to generate assume pathways
+more quickly and efficiently.
+
+# Features
+
+- Finds all active/expired temporary credentials.
+- Finds all active/inactive/deleted long-term access keys.
+- Neo4j Graph Database entegration to visualize the anomalous view perfect.    
+- Detects AWS Role Juggling Attack, tags the API calls that come from blacklisted IP's, finds EC2 instance credentials used outside of the EC2 instance.
 - Finds anomalies in the log records, which includes the generation of temporary credentials and the creation of access keys.
 
-### TODO:
-=======
+## TODO:
+
 - Develop frontend to visualise the credential path map. (For now, you can view your output only from Neo4j browser.) 
-- Add detection mechanism for Role Juggling Attack
 - Multi region cloudtrail control for now its only for us-east-1. (The fact that IAM does not employ regions ensures that we never miss an IAM case. Exposed credential controls for EC2 are the only issue.)
-- Detect problematic api calls for security.
 - Detect privilege escalation scenarios.
 - Detect anomalous lateral movements.
+- Use saved log files from buckets.
 
-## Installation
+# Installation
 
 Install Neo4j Database : https://neo4j.com/docs/operations-manual/current/installation/
 
