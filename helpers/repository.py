@@ -232,7 +232,7 @@ class Neo4jDatabase:
 
         return nodes_with_max_relationship.data()
 
-    def find_longest_uniq_paths(self):
+    def find_longest_unique_paths(self):
         # This query gives the longest unique paths
         possible_role_juggling_paths = self.driver.session().run('''MATCH p=(parent)-[r*]->(child)
                                                                     WHERE NOT EXISTS((child)-->())

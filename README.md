@@ -16,24 +16,33 @@
 
 ## Description
 
-CloudPathSniffer is open-source, easy to use and extensible Cloud Anomaly Detection platform designed to help security teams to find hard to see risks and undetected attackers in their control plane of cloud environments.
+CloudPathSniffer is open-source, easy to use and extensible Cloud Anomaly Detection platform designed to help security
+teams to find hard to see risks and undetected attackers in their control plane of cloud environments.
 
-In the dynamic environment of cloud security, the inability to view temporary credentials has long been a risk, making it difficult to detect and track potential malicious activity. 
+In the dynamic environment of cloud security, the inability to view temporary credentials has long been a risk, making
+it difficult to detect and track potential malicious activity.
 
-CloudPathSniffer transcends conventional approaches by not only tracking temporary credentials but also unveiling concealed vulnerabilities within logs. Lateral movements were visualized with graphic-based visualization and the interpretation of the outputs was facilitated. This cutting-edge solution seamlessly integrates these insights into the graph database alongside your credentials, resulting in a holistic defense strategy that leaves no stone unturned.
+CloudPathSniffer transcends conventional approaches by not only tracking temporary credentials but also unveiling
+concealed vulnerabilities within logs. Lateral movements were visualized with graphic-based visualization and the
+interpretation of the outputs was facilitated. This cutting-edge solution seamlessly integrates these insights into the
+graph database alongside your credentials, resulting in a holistic defense strategy that leaves no stone unturned.
 
 # Features
 
 - Finds all active/expired temporary credentials.
 - Finds all active/inactive/deleted long-term access keys.
-- [Neo4j](https://neo4j.com/) Graph Database entegration to visualize the anomalous view perfect.    
-- Detects AWS Role Juggling Attack, tags the API calls that come from blacklisted IP's, finds EC2 instance credentials used outside of the EC2 instance.
-- Finds anomalies in the log records, which includes the generation of temporary credentials and the creation of access keys.
+- [Neo4j](https://neo4j.com/) Graph Database entegration to visualize the anomalous view perfect.
+- Detects AWS Role Juggling Attack, tags the API calls that come from blacklisted IP's, finds EC2 instance credentials
+  used outside of the EC2 instance.
+- Finds anomalies in the log records, which includes the generation of temporary credentials and the creation of access
+  keys.
 
 ### TODO
 
-- Develop frontend to visualise the credential path map. (If you want to view your data then you can use [Neo4j](https://neo4j.com/) Desktop browser.) 
-- Multi region cloudtrail control for now its only for us-east-1. (The fact that IAM does not employ regions ensures that we never miss an IAM case. Exposed credential controls for EC2 are the only issue.)
+- Develop frontend to visualise the credential path map. (If you want to view your data then you can
+  use [Neo4j](https://neo4j.com/) Desktop browser.)
+- Multi region cloudtrail control for now its only for us-east-1. (The fact that IAM does not employ regions ensures
+  that we never miss an IAM case. Exposed credential controls for EC2 are the only issue.)
 - Detect privilege escalation scenarios.
 - Detect anomalous lateral movements.
 - Use saved log files from buckets.
@@ -41,20 +50,22 @@ CloudPathSniffer transcends conventional approaches by not only tracking tempora
 # Dependencies
 
 ### 3rd-party dependencies:
-  - botocore
-  - py2neo
-  - boto3
-  - neo4j
-  - requests
-  - PyYAML
 
+- botocore
+- py2neo
+- boto3
+- neo4j
+- requests
+- PyYAML
 
 # Installation
 
 - CloudPathSniffer uses Neo4j Database so first you should install Neo4j:
-Install [Neo4j](https://neo4j.com/) Database Desktop Version : https://neo4j.com/docs/operations-manual/current/installation/
+  Install [Neo4j](https://neo4j.com/) Database Desktop
+  Version : https://neo4j.com/docs/operations-manual/current/installation/
 
-Configure your config file with your Neo4j and AWS credentials. You can either add your credentials to aws credentials file and write the profile name to the config.yaml or you can directly add your credentials to the config.yaml.
+Configure your config file with your Neo4j and AWS credentials. You can either add your credentials to aws credentials
+file and write the profile name to the config.yaml or you can directly add your credentials to the config.yaml.
 
 - Explanation of config.yaml ?
 
@@ -85,6 +96,7 @@ neo4j_connection_configurations:
 ```
 
 Install python3 requirements:
+
 ```sh
 pip3 install -r requirements.txt
 ```
@@ -93,6 +105,7 @@ pip3 install -r requirements.txt
 
 Start your Neo4j Database
 Start CloudPathSniffer:
+
 ```sh
 python3 credential_mapper.py
 ```

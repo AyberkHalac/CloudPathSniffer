@@ -7,9 +7,8 @@ from datetime import datetime, timedelta
 from botocore.exceptions import ClientError
 
 from helpers.athena_preparation import prepare_athena
-from helpers.boto3_helpers import create_boto3_session, heartbeat, get_access_key_of_user, get_user, list_users
+from helpers.boto3_helpers import get_access_key_of_user, get_user, list_users
 from helpers.config_reader import get_config_file
-from helpers.database_helper import Neo4jDatabase
 from helpers.logger import setup_logger
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,32 +19,16 @@ logger = setup_logger(logger_name='credential_mapper', filename=LOG_FILE_PATH)
 
 class CredentialMapper:
 
-    def __init__(self, aws_profile_name=None, aws_access_key_id=None, aws_secret_access_key=None, aws_session_token=None):
+    def __init__(self, session):
         try:
-            if aws_profile_name is not None or (aws_access_key_id is not None and aws_secret_access_key is not None):
-                self.session = create_boto3_session(aws_profile_name=aws_profile_name, aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, aws_session_token=aws_session_token)
-            else:
-                _profile_name, _aws_access_key_id, _aws_secret_access_key, _aws_session_token = '', '', '', ''
-                try:
-                    self.config = get_config_file('./config.yaml')
-                    _profile_name = self.config['aws_profile_name']
-                    _aws_access_key_id = self.config['aws_access_key_id']
-                    _aws_secret_access_key = self.config['aws_secret_access_key']
-                    _aws_session_token = self.config['aws_session_token']
-                    self.all_temporary_credentials_timespan = self.config['all_temporary_credentials']
-                except Exception as e:
-                    logger.critical(e)
-                    print('Cannot read the config.yaml!')
-                    exit(1)
-                beat = heartbeat(aws_profile_name=_profile_name, aws_access_key_id=_aws_access_key_id, aws_secret_access_key=_aws_secret_access_key, aws_session_token=_aws_session_token)
-                if not beat:
-                    print('Access Key Expired!')
-                    exit(1)
-                self.session = create_boto3_session(aws_profile_name=_profile_name, aws_access_key_id=_aws_access_key_id, aws_secret_access_key=_aws_secret_access_key, aws_session_token=_aws_session_token)
+            self.session = session
             self.cloudtrail_client = self.session.client('cloudtrail')
             self.athena_client = self.session.client('athena')
             self.ec2_client = self.session.client('ec2')
-            prepare_athena(self.athena_client, self.config['bucket_name'], self.session.client('sts').get_caller_identity()['Account'])
+            config = get_config_file('./config.yaml')
+            self.all_temporary_credentials_timespan = config['all_temporary_credentials']
+            self.bucket_name = config['bucket_name']
+            prepare_athena(self.athena_client, config['bucket_name'], self.session.client('sts').get_caller_identity()['Account'])
         except Exception as e:
             print('[!] Error at starting credential mapper.')
             logger.critical(e)
@@ -113,7 +96,7 @@ class CredentialMapper:
                                         ORDER BY eventtime ASC""".format(event_time=datetime_object)
 
             query_response = self.athena_client.start_query_execution(QueryString=sql_query,
-                                                                      ResultConfiguration={'OutputLocation': f's3://{self.config["bucket_name"]}/CredentialMapper/'},
+                                                                      ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
                                                                       QueryExecutionContext={'Database': 'CredentialMapper'}
                                                                       )
             query_execution_id = query_response['QueryExecutionId']
@@ -340,7 +323,7 @@ class CredentialMapper:
         """.format(event_time=datetime_object)
 
         query_response = self.athena_client.start_query_execution(QueryString=sql_query,
-                                                                  ResultConfiguration={'OutputLocation': f's3://{self.config["bucket_name"]}/CredentialMapper/'},
+                                                                  ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
                                                                   QueryExecutionContext={'Database': 'CredentialMapper'}
                                                                   )
         query_execution_id = query_response['QueryExecutionId']
@@ -425,14 +408,3 @@ class CredentialMapper:
                     'event_name': data['event_name']
                 })
         return console_logins
-
-
-if __name__ == "__main__":
-    greeter = Neo4jDatabase()
-    greeter.neo4j_delete_all()
-    cred_mapper = CredentialMapper()
-    credentials = cred_mapper.get_all_generated_credentials()
-    greeter.neo4j_bulk_add_credentials(credentials)
-    console_logins = cred_mapper.check_console_login_of_iam_credentials()
-    if len(console_logins) > 0:
-        greeter.add_rel_as_console_login_of_iam_credentials(console_logins)
