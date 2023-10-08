@@ -1,4 +1,5 @@
 import ipaddress
+import json
 import os
 import time
 from datetime import datetime, timedelta
@@ -34,7 +35,7 @@ def is_ip_in_ec2_range(ip_address):
     return is_aws_ip
 
 
-def role_juggling_long_repeating_pattern():
+def detect_role_juggling_long_repeating_pattern():
     """
     This needs a lot of tests for sure :)
 
@@ -66,7 +67,8 @@ def role_juggling_long_repeating_pattern():
     def find_repeating_pattern_info(arr):
         pattern_length = 2  # Minimum pattern length to consider
         n = len(arr)
-
+        start_index = 0
+        end_index = 0
         for pattern_length in range(2, len(arr) // 2 + 1):
             for i in range(n - 2 * pattern_length + 1):
                 pattern = arr[i:i + pattern_length]
@@ -115,11 +117,20 @@ class Security:
 
     def __init__(self, session: boto3.Session, region: str):
         self.session = session
-        config = get_config_file('./config.yaml')
+        self.region = region
+        self.athena_client = self.session.client(service_name='athena', region_name=self.region)
+
+        try:
+            config = get_config_file('./config.yaml')
+            self.all_temporary_credentials_timespan = config['all_temporary_credentials']
+        except Exception as e:
+            logger.critical('[!] Getting error reading config file', str(e))
+            return
+
         self.bucket_name = config['bucket_name']
         self.region = region
 
-    def check_exposed_ec2_temporary_credentials(self):
+    def detect_exposed_ec2_temporary_credentials(self):
         """
         Technique 1-
         In this technique, we lost logs that are older than the creation of the current ip address.
@@ -153,8 +164,6 @@ class Security:
         risky_requests_from_unsecure_ip = []
 
         instance_list = describe_instances(session=self.session, region=self.region)
-
-        athena_client = self.session.client(service_name='athena', region_name=self.region)
         # find the last time the ip address changed
 
         for i in range(len(instance_list)):
@@ -173,20 +182,20 @@ class Security:
                  DESC 
                  LIMIT 1""".format(InstanceId=instance_list[i]['InstanceId'])
 
-                query_response = athena_client.start_query_execution(QueryString=sql_query,
-                                                                     ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
-                                                                     QueryExecutionContext={'Database': 'CredentialMapper'}
-                                                                     )
+                query_response = self.athena_client.start_query_execution(QueryString=sql_query,
+                                                                          ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
+                                                                          QueryExecutionContext={'Database': 'CredentialMapper'}
+                                                                          )
                 query_execution_id = query_response['QueryExecutionId']
 
-                query_response = athena_client.get_query_execution(
+                query_response = self.athena_client.get_query_execution(
                     QueryExecutionId=query_execution_id
                 )
                 ready_state = query_response['QueryExecution']['Status']['State']
 
                 timeout = 600
                 while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
-                    query_response = athena_client.get_query_execution(
+                    query_response = self.athena_client.get_query_execution(
                         QueryExecutionId=query_execution_id
                     )
                     ready_state = query_response['QueryExecution']['Status']['State']
@@ -200,12 +209,12 @@ class Security:
                 first = True
                 while len(response.keys()) == 0 or is_truncated:
                     if is_truncated is False:
-                        response = athena_client.get_query_results(
+                        response = self.athena_client.get_query_results(
                             QueryExecutionId=query_execution_id,
                             MaxResults=50
                         )
                     else:
-                        response = athena_client.get_query_results(
+                        response = self.athena_client.get_query_results(
                             QueryExecutionId=query_execution_id,
                             MaxResults=50,
                             NextToken=response['NextToken']
@@ -253,20 +262,20 @@ class Security:
                                                               event_time=instance['datetime'],
                                                               PublicIpAddress=instance['PublicIpAddress'])
 
-                query_response = athena_client.start_query_execution(QueryString=sql_query,
-                                                                     ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
-                                                                     QueryExecutionContext={'Database': 'CredentialMapper'}
-                                                                     )
+                query_response = self.athena_client.start_query_execution(QueryString=sql_query,
+                                                                          ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
+                                                                          QueryExecutionContext={'Database': 'CredentialMapper'}
+                                                                          )
                 query_execution_id = query_response['QueryExecutionId']
 
-                query_response = athena_client.get_query_execution(
+                query_response = self.athena_client.get_query_execution(
                     QueryExecutionId=query_execution_id
                 )
                 ready_state = query_response['QueryExecution']['Status']['State']
 
                 timeout = 600
                 while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
-                    query_response = athena_client.get_query_execution(
+                    query_response = self.athena_client.get_query_execution(
                         QueryExecutionId=query_execution_id
                     )
                     ready_state = query_response['QueryExecution']['Status']['State']
@@ -280,12 +289,12 @@ class Security:
                 first = True
                 while len(response.keys()) == 0 or is_truncated:
                     if is_truncated is False:
-                        response = athena_client.get_query_results(
+                        response = self.athena_client.get_query_results(
                             QueryExecutionId=query_execution_id,
                             MaxResults=50
                         )
                     else:
-                        response = athena_client.get_query_results(
+                        response = self.athena_client.get_query_results(
                             QueryExecutionId=query_execution_id,
                             MaxResults=50,
                             NextToken=response['NextToken']
@@ -314,7 +323,7 @@ class Security:
             print(e)
         return risky_requests_from_unsecure_ip
 
-    def check_exposed_ec2_temporary_credentials_with_aws_ips(self):
+    def detect_exposed_ec2_temporary_credentials_with_aws_ips(self):
         """
         This function analyzes instances to see if their initial credentials are used outside of the instance.
 
@@ -325,8 +334,6 @@ class Security:
 
         :return: dictionary of instance(str):event(array) couple.
         """
-        athena_client = self.session.client(service_name='athena', region_name=self.region)
-
         try:
             risky_requests_from_unsecure_ip = []
 
@@ -345,20 +352,20 @@ class Security:
                                 and eventtime > '{event_time}' 
                                 ORDER BY eventtime DESC""".format(event_time=datetime_object)
 
-            query_response = athena_client.start_query_execution(QueryString=sql_query,
-                                                                 ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
-                                                                 QueryExecutionContext={'Database': 'CredentialMapper'}
-                                                                 )
+            query_response = self.athena_client.start_query_execution(QueryString=sql_query,
+                                                                      ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
+                                                                      QueryExecutionContext={'Database': 'CredentialMapper'}
+                                                                      )
             query_execution_id = query_response['QueryExecutionId']
 
-            query_response = athena_client.get_query_execution(
+            query_response = self.athena_client.get_query_execution(
                 QueryExecutionId=query_execution_id
             )
             ready_state = query_response['QueryExecution']['Status']['State']
 
             timeout = 600
             while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
-                query_response = athena_client.get_query_execution(
+                query_response = self.athena_client.get_query_execution(
                     QueryExecutionId=query_execution_id
                 )
                 ready_state = query_response['QueryExecution']['Status']['State']
@@ -372,12 +379,12 @@ class Security:
             first = True
             while len(response.keys()) == 0 or is_truncated:
                 if is_truncated is False:
-                    response = athena_client.get_query_results(
+                    response = self.athena_client.get_query_results(
                         QueryExecutionId=query_execution_id,
                         MaxResults=50
                     )
                 else:
-                    response = athena_client.get_query_results(
+                    response = self.athena_client.get_query_results(
                         QueryExecutionId=query_execution_id,
                         MaxResults=50,
                         NextToken=response['NextToken']
@@ -409,9 +416,8 @@ class Security:
             logger.critical(e)
             return []
 
-    def check_logs_for_blacklisted_ip_accesses(self):
+    def detect_logs_for_blacklisted_ip_accesses(self):
         try:
-            athena_client = self.session.client(service_name='athena', region_name=self.region)
             blacklisted_trails = []
             blacklisted_ip_list = []
             blacklist_feed_url = 'https://raw.githubusercontent.com/stamparm/ipsum/master/ipsum.txt'
@@ -439,20 +445,20 @@ class Security:
                             and sourceipaddress in {blacklisted_ip_list}
                             ORDER BY eventtime DESC""".format(event_time=datetime_object, blacklisted_ip_list=tuple(blacklisted_ip_list))
 
-            query_response = athena_client.start_query_execution(QueryString=sql_query,
-                                                                 ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
-                                                                 QueryExecutionContext={'Database': 'CredentialMapper'}
-                                                                 )
+            query_response = self.athena_client.start_query_execution(QueryString=sql_query,
+                                                                      ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
+                                                                      QueryExecutionContext={'Database': 'CredentialMapper'}
+                                                                      )
             query_execution_id = query_response['QueryExecutionId']
 
-            query_response = athena_client.get_query_execution(
+            query_response = self.athena_client.get_query_execution(
                 QueryExecutionId=query_execution_id
             )
             ready_state = query_response['QueryExecution']['Status']['State']
 
             timeout = 600
             while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
-                query_response = athena_client.get_query_execution(
+                query_response = self.athena_client.get_query_execution(
                     QueryExecutionId=query_execution_id
                 )
                 ready_state = query_response['QueryExecution']['Status']['State']
@@ -466,12 +472,12 @@ class Security:
             first = True
             while len(response.keys()) == 0 or is_truncated:
                 if is_truncated is False:
-                    response = athena_client.get_query_results(
+                    response = self.athena_client.get_query_results(
                         QueryExecutionId=query_execution_id,
                         MaxResults=50
                     )
                 else:
-                    response = athena_client.get_query_results(
+                    response = self.athena_client.get_query_results(
                         QueryExecutionId=query_execution_id,
                         MaxResults=50,
                         NextToken=response['NextToken']
@@ -504,3 +510,238 @@ class Security:
             return []
 
         return blacklisted_trails
+
+    def detect_console_login_of_iam_credentials(self):
+        """
+        https://github.com/Hacking-the-Cloud/hackingthe.cloud/blob/main/content/aws/post_exploitation/create_a_console_session_from_iam_credentials.md
+        This function checks if the attacker get console access via iam credentials.
+        This function is void and fills the neo4j database
+        """
+        console_logins = []
+
+        start_time = datetime.utcnow() - timedelta(days=self.all_temporary_credentials_timespan['days'], hours=self.all_temporary_credentials_timespan['hours'], minutes=self.all_temporary_credentials_timespan['minutes'])
+        datetime_object = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S.%f").strftime("%Y-%m-%dT%H:%M:%SZ")
+        sql_query = """
+        SELECT  
+            cast(useridentity as json) as useridentity,
+            eventtime,
+            sourceipaddress,
+            eventid,
+            eventname
+        FROM CredentialMapper 
+            WHERE 
+                errorcode is NULL
+                and useridentity.type='FederatedUser'
+                and eventname = 'ConsoleLogin'
+                and eventtime > '2023-07-07T14:55:21Z'
+            ORDER BY eventtime ASC
+        """.format(event_time=datetime_object)
+
+        query_response = self.athena_client.start_query_execution(QueryString=sql_query,
+                                                                  ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
+                                                                  QueryExecutionContext={'Database': 'CredentialMapper'}
+                                                                  )
+        query_execution_id = query_response['QueryExecutionId']
+
+        query_response = self.athena_client.get_query_execution(
+            QueryExecutionId=query_execution_id
+        )
+        ready_state = query_response['QueryExecution']['Status']['State']
+
+        timeout = 600
+        while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
+            query_response = self.athena_client.get_query_execution(
+                QueryExecutionId=query_execution_id
+            )
+            ready_state = query_response['QueryExecution']['Status']['State']
+            time.sleep(2)
+            timeout -= 2
+            if timeout <= 0:
+                raise ClientError
+
+        response = {}
+        is_truncated = False
+        first = True
+        while len(response.keys()) == 0 or is_truncated:
+            if is_truncated is False:
+                response = self.athena_client.get_query_results(
+                    QueryExecutionId=query_execution_id,
+                    MaxResults=50
+                )
+            else:
+                response = self.athena_client.get_query_results(
+                    QueryExecutionId=query_execution_id,
+                    MaxResults=50,
+                    NextToken=response['NextToken']
+                )
+
+            logger.debug("[+] Start parsing the data")
+            for trail in response['ResultSet']['Rows']:
+                if first:
+                    first = False
+                    continue
+
+                data = {
+                    'user_identity': trail['Data'][0]['VarCharValue'] if 'VarCharValue' in trail['Data'][0] else '',
+                    'event_time': trail['Data'][1]['VarCharValue'] if 'VarCharValue' in trail['Data'][1] else '',
+                    'source_ip_address': trail['Data'][2]['VarCharValue'] if 'VarCharValue' in trail['Data'][2] else '',
+                    'event_id': trail['Data'][3]['VarCharValue'] if 'VarCharValue' in trail['Data'][3] else '',
+                    'event_name': trail['Data'][4]['VarCharValue'] if 'VarCharValue' in trail['Data'][4] else '',
+
+                }
+                user_identity = json.loads(data['user_identity'])
+                user_identity_type = user_identity['type']
+                user_identity_principalid = user_identity['principalid']
+                user_identity_arn = user_identity['arn']
+                user_identity_accountid = user_identity['accountid']
+                user_identity_session_issuer = user_identity['sessioncontext']['sessionissuer']
+
+                if user_identity_session_issuer['type'] == "IAMUser":
+                    requesters_identity_type = user_identity_session_issuer['type']
+                    requesters_identity_principalid = user_identity_session_issuer['principalid']
+                    requesters_identity_arn = user_identity_session_issuer['arn']
+                    requesters_identity_username = user_identity_session_issuer['username']
+                else:  # TODO: Check other scenarios about this part
+                    requesters_identity_type = None
+                    requesters_identity_principalid = None
+                    requesters_identity_arn = None
+                    requesters_identity_username = None
+
+                timestamp = datetime.strptime(data['event_time'], '%Y-%m-%dT%H:%M:%SZ').strftime('%b %d, %Y, %I:%M:%S %p')
+                console_logins.append({
+                    'user_identity_type': user_identity_type,
+                    'user_identity_principalid': user_identity_principalid,
+                    'user_identity_arn': user_identity_arn,
+                    'user_identity_accountid': user_identity_accountid,
+                    'requesters_identity_type': requesters_identity_type,
+                    'requesters_identity_principalid': requesters_identity_principalid,
+                    'requesters_identity_arn': requesters_identity_arn,
+                    'requesters_identity_username': requesters_identity_username,
+                    'event_time': timestamp,
+                    'source_ip_address': data['source_ip_address'],
+                    'event_id': data['event_id'],
+                    'event_name': data['event_name']
+                })
+        return console_logins
+
+    def detect_honey_token_unblocked_activities(self):
+        self.detect_honey_tokens()
+
+    def detect_honey_tokens(self):
+        """
+        spacesiren:
+        {
+          "key": {
+            "key_id": "59ee279b-941b-4312-89c4-35030caba89a",
+            "secret_id": "LiNasGp5g8hgNo0GvebYnNyqLJ50bMqSLYe97jdjsWw=",
+            "_etc": "etc."
+          }
+        }
+
+        :return:
+        """
+        honey_tokens = []
+        start_time = datetime.utcnow() - timedelta(days=self.all_temporary_credentials_timespan['days'], hours=self.all_temporary_credentials_timespan['hours'], minutes=self.all_temporary_credentials_timespan['minutes'])
+        datetime_object = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S.%f").strftime("%Y-%m-%dT%H:%M:%SZ")
+        sql_query = """
+        SELECT  
+            cast(useridentity as json) as useridentity,
+            eventtime,
+            sourceipaddress,
+            eventid,
+            eventname
+        FROM CredentialMapper 
+            WHERE 
+                errorcode is NULL
+                and useridentity.type='FederatedUser'
+                and eventname = 'ConsoleLogin'
+                and eventtime > '2023-07-07T14:55:21Z'
+            ORDER BY eventtime ASC
+        """.format(event_time=datetime_object)
+
+        query_response = self.athena_client.start_query_execution(QueryString=sql_query,
+                                                                  ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
+                                                                  QueryExecutionContext={'Database': 'CredentialMapper'}
+                                                                  )
+        query_execution_id = query_response['QueryExecutionId']
+
+        query_response = self.athena_client.get_query_execution(
+            QueryExecutionId=query_execution_id
+        )
+        ready_state = query_response['QueryExecution']['Status']['State']
+
+        timeout = 600
+        while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
+            query_response = self.athena_client.get_query_execution(
+                QueryExecutionId=query_execution_id
+            )
+            ready_state = query_response['QueryExecution']['Status']['State']
+            time.sleep(2)
+            timeout -= 2
+            if timeout <= 0:
+                raise ClientError
+
+        response = {}
+        is_truncated = False
+        first = True
+        while len(response.keys()) == 0 or is_truncated:
+            if is_truncated is False:
+                response = self.athena_client.get_query_results(
+                    QueryExecutionId=query_execution_id,
+                    MaxResults=50
+                )
+            else:
+                response = self.athena_client.get_query_results(
+                    QueryExecutionId=query_execution_id,
+                    MaxResults=50,
+                    NextToken=response['NextToken']
+                )
+
+            logger.debug("[+] Start parsing the data")
+            for trail in response['ResultSet']['Rows']:
+                if first:
+                    first = False
+                    continue
+
+                data = {
+                    'user_identity': trail['Data'][0]['VarCharValue'] if 'VarCharValue' in trail['Data'][0] else '',
+                    'event_time': trail['Data'][1]['VarCharValue'] if 'VarCharValue' in trail['Data'][1] else '',
+                    'source_ip_address': trail['Data'][2]['VarCharValue'] if 'VarCharValue' in trail['Data'][2] else '',
+                    'event_id': trail['Data'][3]['VarCharValue'] if 'VarCharValue' in trail['Data'][3] else '',
+                    'event_name': trail['Data'][4]['VarCharValue'] if 'VarCharValue' in trail['Data'][4] else '',
+
+                }
+                user_identity = json.loads(data['user_identity'])
+                user_identity_type = user_identity['type']
+                user_identity_principalid = user_identity['principalid']
+                user_identity_arn = user_identity['arn']
+                user_identity_accountid = user_identity['accountid']
+                user_identity_session_issuer = user_identity['sessioncontext']['sessionissuer']
+
+                if user_identity_session_issuer['type'] == "IAMUser":
+                    requesters_identity_type = user_identity_session_issuer['type']
+                    requesters_identity_principalid = user_identity_session_issuer['principalid']
+                    requesters_identity_arn = user_identity_session_issuer['arn']
+                    requesters_identity_username = user_identity_session_issuer['username']
+                else:  # TODO: Check other scenarios about this part
+                    requesters_identity_type = None
+                    requesters_identity_principalid = None
+                    requesters_identity_arn = None
+                    requesters_identity_username = None
+
+                timestamp = datetime.strptime(data['event_time'], '%Y-%m-%dT%H:%M:%SZ').strftime('%b %d, %Y, %I:%M:%S %p')
+                honey_tokens.append({
+                    'user_identity_type': user_identity_type,
+                    'user_identity_principalid': user_identity_principalid,
+                    'user_identity_arn': user_identity_arn,
+                    'user_identity_accountid': user_identity_accountid,
+                    'requesters_identity_type': requesters_identity_type,
+                    'requesters_identity_principalid': requesters_identity_principalid,
+                    'requesters_identity_arn': requesters_identity_arn,
+                    'requesters_identity_username': requesters_identity_username,
+                    'event_time': timestamp,
+                    'source_ip_address': data['source_ip_address'],
+                    'event_id': data['event_id'],
+                    'event_name': data['event_name']
+                })
+        return honey_tokens

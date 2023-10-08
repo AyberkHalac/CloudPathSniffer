@@ -1,7 +1,7 @@
 import argparse
 import os
 
-from credential_mapper import CredentialMapper
+from credential_crawler import CredentialMapper
 from helpers.boto3_helpers import heartbeat, create_boto3_session
 from helpers.config_reader import get_config_file
 from helpers.logger import setup_logger

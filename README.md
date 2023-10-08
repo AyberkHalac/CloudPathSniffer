@@ -14,6 +14,13 @@
 
 # Introduction
 
+<img src="https://www.blackhat.com/images/logo.png">
+
+<b>This project will be presented at BlackHat Europe 2023 ARSENAL.</b>
+
+<a href="https://www.blackhat.com/eu-23/arsenal/schedule/index.html#cloudpathsniffer-detect-and-visualize-abnormal-lateral-movements-in-cloud-35745">
+BlackHat Europe 2023 Cloud Path Sniffer</a>
+
 ## Description
 
 CloudPathSniffer is open-source, easy to use and extensible Cloud Anomaly Detection platform designed to help security
@@ -39,7 +46,7 @@ graph database alongside your credentials, resulting in a holistic defense strat
 
 ### TODO
 
-- Develop frontend to visualise the credential path map. (If you want to view your data then you can
+- Develop frontend to visualise the credential path graph. (If you want to view your data then you can
   use [Neo4j](https://neo4j.com/) Desktop browser.)
 - Multi region cloudtrail control for now its only for us-east-1. (The fact that IAM does not employ regions ensures
   that we never miss an IAM case. Exposed credential controls for EC2 are the only issue.)
@@ -103,11 +110,11 @@ pip3 install -r requirements.txt
 
 # Usage
 
-Start your Neo4j Database
-Start CloudPathSniffer:
+- Start your Neo4j Database
+- Start CloudPathSniffer:
 
 ```sh
-python3 credential_mapper.py
+python3 cloud_path_sniffer.py
 ```
 
 # License
