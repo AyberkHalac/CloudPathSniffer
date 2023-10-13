@@ -14,7 +14,7 @@
 
 # Introduction
 
-<img src="https://www.blackhat.com/images/logo.png">
+<img src="https://pbs.twimg.com/profile_images/882639407748046849/lc0tYBlW_400x400.jpg">
 
 <b>This project will be presented at BlackHat Europe 2023 ARSENAL.</b>
 
