@@ -59,7 +59,6 @@ graph database alongside your credentials, resulting in a holistic defense strat
 ### 3rd-party dependencies:
 
 - botocore
-- py2neo
 - boto3
 - neo4j
 - requests

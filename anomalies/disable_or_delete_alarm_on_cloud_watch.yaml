@@ -1,0 +1,5 @@
+where_condition: eventname='DeleteAlarms' or eventname='DisableAlarmActions'
+
+description: Someone tried to stop or delete Cloud Watch Alarms.
+
+severity: Critical

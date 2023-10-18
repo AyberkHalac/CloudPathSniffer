@@ -1,0 +1,5 @@
+where_condition: eventname='StopLogging' or eventname='DeleteTrail'
+
+description: Someone tried to stop logging or delete trails on Cloud Trail.
+
+severity: Critical

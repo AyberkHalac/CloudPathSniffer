@@ -10,6 +10,7 @@ from helpers.athena_preparation import prepare_athena
 from helpers.boto3_helpers import get_access_key_of_user, get_user, list_users
 from helpers.config_reader import get_config_file
 from helpers.logger import setup_logger
+from helpers.repository import Neo4jDatabase
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE_PATH = os.path.join(os.path.join(ROOT_DIR, 'logs'), 'CredentialMapper.log')
@@ -28,6 +29,7 @@ class CredentialMapper:
             self.all_temporary_credentials_timespan = config['all_temporary_credentials']
             self.bucket_name = config['bucket_name']
             prepare_athena(self.athena_client, config['bucket_name'], self.session.client('sts').get_caller_identity()['Account'])
+            self.neo4j_controller = Neo4jDatabase()
         except Exception as e:
             print('[!] Error at starting credential mapper.')
             logger.critical(e)
@@ -59,8 +61,138 @@ class CredentialMapper:
             dict_writer.writeheader()
             dict_writer.writerows(dict_list)
 
-    def get_all_generated_credentials(self):
+    def add_all_credentials_to_neo4j(self):
+        logger.debug("[+] Starting add_all_credentials_to_neo4j.")
+        try:
+            neo_db = Neo4jDatabase()
+            with neo_db.driver.session() as driver_session:
+                all_temporary_credentials = []
+                start_time = datetime.utcnow() - timedelta(days=self.all_temporary_credentials_timespan['days'], hours=self.all_temporary_credentials_timespan['hours'], minutes=self.all_temporary_credentials_timespan['minutes'])
+                datetime_object = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S.%f").strftime("%Y-%m-%dT%H:%M:%SZ")
+                sql_query = """SELECT DISTINCT cast(useridentity as json) as useridentity
+                                    FROM CredentialMapper 
+                                WHERE 
+                                    eventtime > '{event_time}'""".format(event_time=datetime_object)
 
+                query_response = self.athena_client.start_query_execution(QueryString=sql_query,
+                                                                          ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
+                                                                          QueryExecutionContext={'Database': 'CredentialMapper'}
+                                                                          )
+                query_execution_id = query_response['QueryExecutionId']
+
+                query_response = self.athena_client.get_query_execution(
+                    QueryExecutionId=query_execution_id
+                )
+                ready_state = query_response['QueryExecution']['Status']['State']
+
+                timeout = 600
+                while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
+                    query_response = self.athena_client.get_query_execution(
+                        QueryExecutionId=query_execution_id
+                    )
+                    ready_state = query_response['QueryExecution']['Status']['State']
+                    time.sleep(2)
+                    timeout -= 2
+                    if timeout <= 0:
+                        raise ClientError
+
+                response = {}
+                is_truncated = False
+                first = True
+                while len(response.keys()) == 0 or is_truncated:
+                    if is_truncated is False:
+                        response = self.athena_client.get_query_results(
+                            QueryExecutionId=query_execution_id,
+                            MaxResults=50
+                        )
+                    else:
+                        response = self.athena_client.get_query_results(
+                            QueryExecutionId=query_execution_id,
+                            MaxResults=50,
+                            NextToken=response['NextToken']
+                        )
+
+                    for trail in response['ResultSet']['Rows']:
+                        if first:
+                            first = False
+                            continue
+
+                        data = {
+                            'user_identity': trail['Data'][0]['VarCharValue'] if 'VarCharValue' in trail['Data'][0] else ''
+
+                        }
+                        user_identity = json.loads(data['user_identity'])
+                        user_identity_type = user_identity['type']
+                        user_identity_principalid = user_identity['principalid']
+                        # user_identity_arn = user_identity['arn']
+                        user_identity_accountid = user_identity['accountid']
+                        user_identity_invokedby = user_identity['invokedby']
+                        user_identity_accesskeyid = user_identity['accesskeyid']
+                        user_identity_username = user_identity['username']
+                        # user_identity_sessioncontext = user_identity['sessioncontext']
+
+                        identity = ''
+                        invoked_by = ''
+
+                        if user_identity_type == 'IAMUser':
+                            identity = user_identity_accesskeyid
+                        elif user_identity_type == 'AWSService':
+                            identity = user_identity_invokedby
+                        elif user_identity_type == 'AssumedRole':
+                            identity = user_identity_accesskeyid
+                        elif user_identity_type == 'SAMLUser':
+                            identity = user_identity_username
+                        elif user_identity_type == 'AWSAccount':
+                            identity = user_identity_accountid
+                        elif user_identity_type == 'WebIdentityUser':
+                            identity = user_identity_username
+                        elif user_identity_type == 'FederatedUser':
+                            identity = user_identity_principalid[user_identity_principalid.find(':') + 1:]
+                        elif user_identity_type == 'Root':
+                            identity = 'Root'
+
+                        if identity is None or identity == '' or user_identity_type is None or user_identity_type == '':
+                            continue
+                        # TODO: Add absent identities
+                        """ 
+                        https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-event-reference-user-identity.html
+                        WebIdentityUser     +
+                        AssumedRole         +
+                        AWSAccount          +
+                        AWSService          +
+                        IAMUser             +
+                        Root                -
+                        FederatedUser       +
+                        SAMLUser            +
+                        Unknown             -
+                        Role                -
+                        Directory           -
+                        <novalue>           - the attribute is not found
+                        """
+
+                        all_temporary_credentials.append({'user_identity_type': user_identity_type, 'requesters_identity': identity})
+                        owner_node = driver_session.execute_write(neo_db.create_or_update_node,
+                                                                  label=user_identity_type,
+                                                                  identity=identity,
+                                                                  user_identity_type=user_identity_type)
+
+                    if 'NextToken' in response:
+                        is_truncated = True
+                    else:
+                        is_truncated = False
+            return all_temporary_credentials
+        except ClientError as err:
+            logger.critical(err)
+            print('[!] Exception while the running Athena.')
+            exit(1)
+
+        except Exception as e:
+            logger.critical(e)
+            print('[!] Exception while the running Athena.')
+            exit(1)
+
+    def get_all_relationship_of_credentials(self):
+        logger.debug("[+] Starting get_all_relationship_of_credentials.")
         def check_long_term_access_key_status(userName, accessKey):
             status = 'Deleted'
             accessKeys = get_access_key_of_user(session=self.session, userName=userName)
@@ -73,7 +205,6 @@ class CredentialMapper:
         try:
             added_users = {}
             all_temporary_credentials = []
-            logger.debug("[+] Start gathering information from Athena.")
             start_time = datetime.utcnow() - timedelta(days=self.all_temporary_credentials_timespan['days'], hours=self.all_temporary_credentials_timespan['hours'], minutes=self.all_temporary_credentials_timespan['minutes'])
             datetime_object = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S.%f").strftime("%Y-%m-%dT%H:%M:%SZ")
             sql_query = """SELECT  
@@ -132,7 +263,6 @@ class CredentialMapper:
                         NextToken=response['NextToken']
                     )
 
-                logger.debug("[+] Start parsing the data")
                 for trail in response['ResultSet']['Rows']:
                     if first:
                         first = False
@@ -162,6 +292,7 @@ class CredentialMapper:
                     # user_identity_sessioncontext = user_identity['sessioncontext']
 
                     service_name = ''
+                    requesters_identity = ''
 
                     if user_identity_type == 'IAMUser':
                         requesters_identity = user_identity_accesskeyid
@@ -186,8 +317,6 @@ class CredentialMapper:
                         requesters_identity = user_identity_principalid[user_identity_principalid.find(':') + 1:]
                     elif user_identity_type == 'Root':
                         requesters_identity = 'Root'
-                    else:
-                        requesters_identity = user_identity
 
                     # TODO: Add absent identities
                     """ 
@@ -251,12 +380,10 @@ class CredentialMapper:
                         if created_access_key['userName'] not in added_users:
                             added_users[created_access_key['userName']] = []
                         added_users[created_access_key['userName']].append(created_access_key['accessKeyId'])
-                logger.debug("[+] Parse is finished.")
                 if 'NextToken' in response:
                     is_truncated = True
                 else:
                     is_truncated = False
-            logger.debug("[+] Athena task is finished.")
             logger.debug("[+] Starting to parse absent access keys.")
             users = list_users(session=self.session)
             for user in users:
@@ -289,3 +416,213 @@ class CredentialMapper:
             logger.critical(e)
             print('[!] Exception while the running Athena.')
             exit(1)
+
+    def collect_and_add_unregistered_credentials(self):
+        """
+        Some credentials don't have logs, but they are inside the other logs, so we can crawl them all.
+        :return:
+        """
+        print("Find the information from other logs")
+        #
+
+    def collect_and_fix_ownerless_credentials(self):
+        """
+        Some credentials have no creation log. Therefore, even if we add them to the db, information about them is still missing.
+        For AssumedRole get ???
+        For IAMAccessKeyId get username
+        :return:
+        """
+        ownerless_node_list_of_access_keys = self.neo4j_controller.execute_neo4j_cypher('''MATCH (n:IAMAccessKeyId) WHERE NOT EXISTS(()-->(n)) RETURN n''')
+        try:
+            with self.neo4j_controller.driver.session() as driver_session:
+                for node in ownerless_node_list_of_access_keys:
+                    sql_query = f"""
+                        SELECT cast(useridentity as json) as useridentity
+                            FROM CredentialMapper 
+                        WHERE
+                            useridentity.accesskeyid = '{node['n']['identity']}'
+                        LIMIT 1
+                        """
+
+                    query_response = self.athena_client.start_query_execution(QueryString=sql_query,
+                                                                              ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
+                                                                              QueryExecutionContext={'Database': 'CredentialMapper'}
+                                                                              )
+                    query_execution_id = query_response['QueryExecutionId']
+
+                    query_response = self.athena_client.get_query_execution(
+                        QueryExecutionId=query_execution_id
+                    )
+                    ready_state = query_response['QueryExecution']['Status']['State']
+
+                    timeout = 600
+                    while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
+                        query_response = self.athena_client.get_query_execution(
+                            QueryExecutionId=query_execution_id
+                        )
+                        ready_state = query_response['QueryExecution']['Status']['State']
+                        time.sleep(2)
+                        timeout -= 2
+                        if timeout <= 0:
+                            raise ClientError
+
+                    response = self.athena_client.get_query_results(
+                        QueryExecutionId=query_execution_id,
+                        MaxResults=50
+                    )
+                    first = True
+                    for trail in response['ResultSet']['Rows']:
+                        if first:
+                            first = False
+                            continue
+
+                        data = {
+                            'user_identity': trail['Data'][0]['VarCharValue'] if 'VarCharValue' in trail['Data'][0] else ''
+                        }
+                        user_identity = json.loads(data['user_identity'])
+                        user_identity_principalid = user_identity['principalid']
+                        user_identity_arn = user_identity['arn']
+                        user_identity_username = user_identity['username']
+
+                        owner_node = driver_session.execute_write(self.neo4j_controller.create_or_update_node,
+                                                                  label='IAMUser',
+                                                                  identity=user_identity_username,
+                                                                  user_identity_type='IAMUser',
+                                                                  user_id=user_identity_principalid,
+                                                                  user_arn=user_identity_arn
+                                                                  )
+                        access_key_node = driver_session.execute_write(self.neo4j_controller.create_or_update_node,
+                                                                       label='IAMAccessKeyId',
+                                                                       identity=node['n']['identity'],
+                                                                       user_identity_type='IAMAccessKeyId'
+                                                                       )
+
+                        driver_session.write_transaction(self.neo4j_controller.create_relationship,
+                                                         owner_node,
+                                                         'Owns',
+                                                         access_key_node
+                                                         )
+
+        except ClientError as err:
+            logger.critical(err)
+            exit(1)
+        except Exception as e:
+            logger.critical(e)
+            exit(1)
+
+        # TODO: ownerless_access_keys = self.neo4j_controller.execute_neo4j_cypher('''MATCH (n:AssumedRole) WHERE NOT EXISTS(()-->(n)) RETURN n''') do it for AssumedRoles too
+
+    def bulk_add_credentials(self, credentials):
+        with self.neo4j_controller.driver.session() as session:
+            for crawled_credential in credentials:
+                if crawled_credential['event_name'] == 'CreateAccessKey':
+                    # Credential Start Node
+                    start_node = session.write_transaction(self.neo4j_controller.create_or_update_node,
+                                                           label='IAMUser',
+                                                           identity=crawled_credential['requested_for'],
+                                                           user_identity_type='IAMUser',
+                                                           user_arn=crawled_credential['requested_users_arn'],
+                                                           user_id=crawled_credential['requested_users_id'])
+
+                    # Credential End Node
+                    end_node = session.write_transaction(self.neo4j_controller.create_or_update_node,
+                                                         label='IAMAccessKeyId',
+                                                         identity=crawled_credential['access_key_id'],
+                                                         user_identity_type='IAMAccessKeyId',
+                                                         is_active=crawled_credential['is_active'])
+
+                    # Create Relationship
+                    session.write_transaction(self.neo4j_controller.create_relationship,
+                                              start_node,
+                                              crawled_credential['event_name'],
+                                              end_node,
+                                              source_ip_address=crawled_credential['source_ip_address'],
+                                              event_id=crawled_credential['event_id'],
+                                              event_name=crawled_credential['event_name'],
+                                              event_time=crawled_credential['event_time'],
+                                              requesters_identity=crawled_credential['requesters_identity'])
+                else:
+                    # Handle ASSUME ROLE
+                    if crawled_credential['user_identity_type'] == 'FederatedUser':
+                        service_name, requesters_identity = crawled_credential['requesters_identity'].split(':', 1)
+                        start_node = session.write_transaction(self.neo4j_controller.create_or_update_node,
+                                                               label=crawled_credential['user_identity_type'],
+                                                               identity=requesters_identity,
+                                                               user_identity_type=crawled_credential['user_identity_type'],
+                                                               service_name=service_name)
+                    else:
+                        node_label = 'IAMAccessKeyId' if crawled_credential['requesters_identity'].startswith('AKIA') else crawled_credential['user_identity_type']
+                        user_identity_type = 'IAMAccessKeyId' if crawled_credential['requesters_identity'].startswith('AKIA') else crawled_credential['user_identity_type']
+
+                        start_node = session.write_transaction(self.neo4j_controller.create_or_update_node,
+                                                               label=node_label,
+                                                               identity=crawled_credential['requesters_identity'],
+                                                               user_identity_type=user_identity_type)
+
+                    end_node = session.write_transaction(self.neo4j_controller.create_or_update_node,
+                                                         label='AssumedRole',
+                                                         identity=crawled_credential['access_key_id'],
+                                                         user_identity_type='IAMAccessKeyId',
+                                                         access_key_id=crawled_credential['access_key_id'],
+                                                         expiration_time=crawled_credential['expiration_time'],
+                                                         assumed_role_arn=crawled_credential['assumed_role_arn'],
+                                                         requested_role=crawled_credential['requested_role'],
+                                                         is_active=crawled_credential['is_active'])
+
+                    session.write_transaction(self.neo4j_controller.create_relationship,
+                                              start_node,
+                                              crawled_credential['event_name'],
+                                              end_node,
+                                              source_ip_address=crawled_credential['source_ip_address'],
+                                              event_id=crawled_credential['event_id'],
+                                              event_name=crawled_credential['event_name'],
+                                              event_time=crawled_credential['event_time'])
+
+                    if crawled_credential['event_name'] == 'GetFederationToken':
+                        requested_suspicious_node = session.write_transaction(self.neo4j_controller.create_or_update_node,
+                                                                              label='RequestedNode',
+                                                                              identity=crawled_credential['requested_role'])
+
+                        session.write_transaction(self.neo4j_controller.create_relationship,
+                                                  end_node,
+                                                  'FederationRoleRequest',
+                                                  requested_suspicious_node,
+                                                  source_ip_address=crawled_credential['source_ip_address'],
+                                                  event_id=crawled_credential['event_id'],
+                                                  event_name=crawled_credential['event_name'],
+                                                  event_time=crawled_credential['event_time'])
+
+    def add_console_login_of_iam_credentials(self, console_login_data_list):
+        with self.neo4j_controller.driver.session() as session:
+            for console_login_data in console_login_data_list:
+                # Credential Start Node
+                start_node = self.neo4j_controller.create_or_update_node(
+                    session,
+                    label='IAMUser',
+                    identity=console_login_data['requesters_identity_username'],
+                    user_identity_type='IAMUser',
+                    user_arn=console_login_data['requesters_identity_arn'],
+                    user_id=console_login_data['requesters_identity_principalid']
+                )
+
+                # Credential End Node
+                end_node = self.neo4j_controller.create_or_update_node(
+                    session,
+                    label=console_login_data['user_identity_type'],
+                    identity=console_login_data['user_identity_principalid'][console_login_data['user_identity_principalid'].find(':') + 1:],
+                    user_identity_type=console_login_data['user_identity_type'],
+                    user_arn=console_login_data['user_identity_arn'],
+                    principal_id=console_login_data['user_identity_principalid'],
+                    account_id=console_login_data['user_identity_accountid']
+                )
+
+                # Create Relationship
+                session.write_transaction(self.neo4j_controller.create_relationship,
+                                          start_node,
+                                          'SuspiciousConsoleLogin',
+                                          end_node,
+                                          source_ip_address=console_login_data['source_ip_address'],
+                                          event_id=console_login_data['event_id'],
+                                          event_name=console_login_data['event_name'],
+                                          event_time=console_login_data['event_time']
+                                          )

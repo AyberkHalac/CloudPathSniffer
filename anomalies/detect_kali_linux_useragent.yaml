@@ -1,0 +1,5 @@
+where_condition: useragent like '%kali%'
+
+description: Detect Kali Linux UserAgent in Logs.
+
+severity: High

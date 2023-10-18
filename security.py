@@ -35,91 +35,13 @@ def is_ip_in_ec2_range(ip_address):
     return is_aws_ip
 
 
-def detect_role_juggling_long_repeating_pattern():
-    """
-    This needs a lot of tests for sure :)
-
-
-    Example input output:
-    I1 - [1,2,3,1,2,3,1,2,3]
-    O1 - Longest repeating list: [1,2,3,1,2,3,1,2,3] repeating element: [1,2,3] start-end index:(0,8)
-
-    I2 - [1,2,3,4,1,2,3,4,1,2,3,4]
-    O2 - Longest repeating list: [1,2,3,4,1,2,3,4,1,2,3,4] repeating element: [1,2,3,4] start-end index:(0,11)
-
-    Repeating list can be 3-n size and has to repeat at least min 2 times
-
-    I3 - [1,2,3,5,1,2,3,6,1,2,3]
-    O3 - Longest repeating list: [] repeating element: [] start-end index:(0,0)
-
-    - The repeating sub-lists' length should be bigger than 3
-    - Repeat time has to be more than 1
-
-    So,
-    Example input output:
-    I1 - [1,2,3,1,2,3]
-    O1 - Longest repeating list: [] repeating element: [] start-end index:(0,0)  -> Because it repeats only 1 times
-
-
-    :return:
-    """
-
-    def find_repeating_pattern_info(arr):
-        pattern_length = 2  # Minimum pattern length to consider
-        n = len(arr)
-        start_index = 0
-        end_index = 0
-        for pattern_length in range(2, len(arr) // 2 + 1):
-            for i in range(n - 2 * pattern_length + 1):
-                pattern = arr[i:i + pattern_length]
-                cycle_count = 0
-
-                for j in range(i + pattern_length, n - pattern_length + 1, pattern_length):
-                    if arr[j:j + pattern_length] == pattern:
-                        cycle_count += 1
-                        start_index = i
-                        end_index = j + pattern_length - 1
-                    else:
-                        break
-
-                if cycle_count >= 2:
-                    return pattern, start_index, end_index
-
-        return None, None, None
-
-    longest_unique_paths = Neo4jDatabase().find_longest_unique_paths()
-
-    array_of_identity_list = []
-    for path in longest_unique_paths:
-        identity_list = []
-        for node in path['p']:
-            if 'user_identity_type' not in node:
-                continue
-            if node['user_identity_type'] == 'AssumedRole':
-                identity_list.append(node['requested_role'])
-            else:
-                identity_list.append(node['identity'])
-
-        array_of_identity_list.append(identity_list)
-
-    for identity_list in array_of_identity_list:
-        pattern, start_index, end_index = find_repeating_pattern_info(identity_list)
-
-        if pattern:
-            print("Repeating Pattern:", ' -> '.join(pattern))
-            print("Start Index:", start_index)
-            print("End Index:", end_index)
-        else:
-            print("No repeating pattern found.")
-
-
 class Security:
 
     def __init__(self, session: boto3.Session, region: str):
         self.session = session
         self.region = region
         self.athena_client = self.session.client(service_name='athena', region_name=self.region)
-
+        self.neo4j_controller = Neo4jDatabase()
         try:
             config = get_config_file('./config.yaml')
             self.all_temporary_credentials_timespan = config['all_temporary_credentials']
@@ -129,6 +51,121 @@ class Security:
 
         self.bucket_name = config['bucket_name']
         self.region = region
+
+    def detect_role_juggling_long_repeating_patterns(self):
+        """
+        This needs a lot of tests for sure :)
+
+
+        Example input output:
+        I1 - [1,2,3,1,2,3,1,2,3]
+        O1 - Longest repeating list: [1,2,3,1,2,3,1,2,3] repeating element: [1,2,3] start-end index:(0,8)
+
+        I2 - [1,2,3,4,1,2,3,4,1,2,3,4]
+        O2 - Longest repeating list: [1,2,3,4,1,2,3,4,1,2,3,4] repeating element: [1,2,3,4] start-end index:(0,11)
+
+        Repeating list can be 3-n size and has to repeat at least min 2 times
+
+        I3 - [1,2,3,5,1,2,3,6,1,2,3]
+        O3 - Longest repeating list: [] repeating element: [] start-end index:(0,0)
+
+        - The repeating sub-lists' length should be bigger than 3
+        - Repeat time has to be more than 1
+
+        So,
+        Example input output:
+        I1 - [1,2,3,1,2,3]
+        O1 - Longest repeating list: [] repeating element: [] start-end index:(0,0)  -> Because it repeats only 1 times
+
+
+        :return:
+        """
+
+        def find_repeating_pattern_info(arr):
+            pattern_length = 2  # Minimum pattern length to consider
+            n = len(arr)
+            start_index = 0
+            end_index = 0
+            for pattern_length in range(2, len(arr) // 2 + 1):
+                for i in range(n - 2 * pattern_length + 1):
+                    pattern = arr[i:i + pattern_length]
+                    cycle_count = 0
+
+                    for j in range(i + pattern_length, n - pattern_length + 1, pattern_length):
+                        if arr[j:j + pattern_length] == pattern:
+                            cycle_count += 1
+                            start_index = i
+                            end_index = j + pattern_length - 1
+                        else:
+                            break
+
+                    if cycle_count >= 2:
+                        return pattern, start_index, end_index
+
+            return None, None, None
+
+        longest_unique_paths = self.find_longest_unique_paths()
+
+        array_of_identity_list = []
+        for path in longest_unique_paths:
+            identity_list = []
+            for node in path['p']:
+                if 'user_identity_type' not in node:
+                    continue
+                if node['user_identity_type'] == 'AssumedRole':
+                    identity_list.append(node['requested_role'])
+                else:
+                    identity_list.append(node['identity'])
+
+            array_of_identity_list.append(identity_list)
+
+        pattern_list = []
+        for identity_list in array_of_identity_list:
+            pattern, start_index, end_index = find_repeating_pattern_info(identity_list)
+
+            if pattern:
+                print("Repeating Pattern:", ' -> '.join(pattern))
+                print("Start Index:", start_index)
+                print("End Index:", end_index)
+                pattern_list.append({'pattern': pattern, 'start_index': start_index, 'end_index': end_index})
+
+        return pattern_list
+
+    def find_longest_unique_paths(self):
+        # This query gives the longest unique paths
+        possible_role_juggling_paths = self.neo4j_controller.execute_neo4j_cypher('''MATCH p=(parent)-[r*]->(child)
+                                                                    WHERE NOT EXISTS((child)-->())
+                                                                        and NOT EXISTS(()-[:AssumeRole|CreateAccessKey]->(parent))
+                                                                        and length(p)>6
+                                                                    RETURN p
+                                                                    ORDER BY length(p) DESC
+                                                                    LIMIT 20''')
+        return possible_role_juggling_paths
+
+    def find_nodes_with_max_relationship(self, contains_service_accounts: False):
+        """
+        The nodes that have the most relationships are found using this method.
+        :param contains_service_accounts:
+        :return: Neo4j Nodes that has max relationship
+        """
+
+        if contains_service_accounts:
+            nodes_with_max_relationship = self.neo4j_controller.execute_neo4j_cypher('''MATCH (n)
+                                                                        WITH n, SIZE([(n)-[]-() | 1]) AS numRelationships
+                                                                        WHERE numRelationships > 20
+                                                                        RETURN n, numRelationships
+                                                                        ORDER BY numRelationships DESC
+                                                                        LIMIT 50;''')
+        else:
+            nodes_with_max_relationship = self.neo4j_controller.execute_neo4j_cypher('''MATCH (n)
+                                                                        WHERE NOT n.identity CONTAINS "amazonaws.com"
+                                                                        WITH n, SIZE([(n)-[]-() | 1]) AS numRelationships
+                                                                        WHERE numRelationships > 10
+                                                                        RETURN n, numRelationships
+                                                                        ORDER BY numRelationships DESC
+                                                                        LIMIT 50;''')
+
+        return nodes_with_max_relationship
 
     def detect_exposed_ec2_temporary_credentials(self):
         """
@@ -416,7 +453,7 @@ class Security:
             logger.critical(e)
             return []
 
-    def detect_logs_for_blacklisted_ip_accesses(self):
+    def detect_blacklisted_ip_accesses(self):
         try:
             blacklisted_trails = []
             blacklisted_ip_list = []
@@ -511,7 +548,7 @@ class Security:
 
         return blacklisted_trails
 
-    def detect_console_login_of_iam_credentials(self):
+    def detect_suspicious_console_login_of_iam_credentials(self):
         """
         https://github.com/Hacking-the-Cloud/hackingthe.cloud/blob/main/content/aws/post_exploitation/create_a_console_session_from_iam_credentials.md
         This function checks if the attacker get console access via iam credentials.
@@ -575,7 +612,6 @@ class Security:
                     NextToken=response['NextToken']
                 )
 
-            logger.debug("[+] Start parsing the data")
             for trail in response['ResultSet']['Rows']:
                 if first:
                     first = False
@@ -624,10 +660,11 @@ class Security:
                 })
         return console_logins
 
-    def detect_honey_token_unblocked_activities(self):
-        self.detect_honey_tokens()
+    def detect_unblocked_honey_token_activities(self):
+        self._detect_honey_tokens()
 
-    def detect_honey_tokens(self):
+    def _detect_honey_tokens(self):
+        # TODO:
         """
         spacesiren:
         {
@@ -641,107 +678,4 @@ class Security:
         :return:
         """
         honey_tokens = []
-        start_time = datetime.utcnow() - timedelta(days=self.all_temporary_credentials_timespan['days'], hours=self.all_temporary_credentials_timespan['hours'], minutes=self.all_temporary_credentials_timespan['minutes'])
-        datetime_object = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S.%f").strftime("%Y-%m-%dT%H:%M:%SZ")
-        sql_query = """
-        SELECT  
-            cast(useridentity as json) as useridentity,
-            eventtime,
-            sourceipaddress,
-            eventid,
-            eventname
-        FROM CredentialMapper 
-            WHERE 
-                errorcode is NULL
-                and useridentity.type='FederatedUser'
-                and eventname = 'ConsoleLogin'
-                and eventtime > '2023-07-07T14:55:21Z'
-            ORDER BY eventtime ASC
-        """.format(event_time=datetime_object)
-
-        query_response = self.athena_client.start_query_execution(QueryString=sql_query,
-                                                                  ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
-                                                                  QueryExecutionContext={'Database': 'CredentialMapper'}
-                                                                  )
-        query_execution_id = query_response['QueryExecutionId']
-
-        query_response = self.athena_client.get_query_execution(
-            QueryExecutionId=query_execution_id
-        )
-        ready_state = query_response['QueryExecution']['Status']['State']
-
-        timeout = 600
-        while ready_state != 'SUCCEEDED' and ready_state != 'FAILED' and timeout > 0:
-            query_response = self.athena_client.get_query_execution(
-                QueryExecutionId=query_execution_id
-            )
-            ready_state = query_response['QueryExecution']['Status']['State']
-            time.sleep(2)
-            timeout -= 2
-            if timeout <= 0:
-                raise ClientError
-
-        response = {}
-        is_truncated = False
-        first = True
-        while len(response.keys()) == 0 or is_truncated:
-            if is_truncated is False:
-                response = self.athena_client.get_query_results(
-                    QueryExecutionId=query_execution_id,
-                    MaxResults=50
-                )
-            else:
-                response = self.athena_client.get_query_results(
-                    QueryExecutionId=query_execution_id,
-                    MaxResults=50,
-                    NextToken=response['NextToken']
-                )
-
-            logger.debug("[+] Start parsing the data")
-            for trail in response['ResultSet']['Rows']:
-                if first:
-                    first = False
-                    continue
-
-                data = {
-                    'user_identity': trail['Data'][0]['VarCharValue'] if 'VarCharValue' in trail['Data'][0] else '',
-                    'event_time': trail['Data'][1]['VarCharValue'] if 'VarCharValue' in trail['Data'][1] else '',
-                    'source_ip_address': trail['Data'][2]['VarCharValue'] if 'VarCharValue' in trail['Data'][2] else '',
-                    'event_id': trail['Data'][3]['VarCharValue'] if 'VarCharValue' in trail['Data'][3] else '',
-                    'event_name': trail['Data'][4]['VarCharValue'] if 'VarCharValue' in trail['Data'][4] else '',
-
-                }
-                user_identity = json.loads(data['user_identity'])
-                user_identity_type = user_identity['type']
-                user_identity_principalid = user_identity['principalid']
-                user_identity_arn = user_identity['arn']
-                user_identity_accountid = user_identity['accountid']
-                user_identity_session_issuer = user_identity['sessioncontext']['sessionissuer']
-
-                if user_identity_session_issuer['type'] == "IAMUser":
-                    requesters_identity_type = user_identity_session_issuer['type']
-                    requesters_identity_principalid = user_identity_session_issuer['principalid']
-                    requesters_identity_arn = user_identity_session_issuer['arn']
-                    requesters_identity_username = user_identity_session_issuer['username']
-                else:  # TODO: Check other scenarios about this part
-                    requesters_identity_type = None
-                    requesters_identity_principalid = None
-                    requesters_identity_arn = None
-                    requesters_identity_username = None
-
-                timestamp = datetime.strptime(data['event_time'], '%Y-%m-%dT%H:%M:%SZ').strftime('%b %d, %Y, %I:%M:%S %p')
-                honey_tokens.append({
-                    'user_identity_type': user_identity_type,
-                    'user_identity_principalid': user_identity_principalid,
-                    'user_identity_arn': user_identity_arn,
-                    'user_identity_accountid': user_identity_accountid,
-                    'requesters_identity_type': requesters_identity_type,
-                    'requesters_identity_principalid': requesters_identity_principalid,
-                    'requesters_identity_arn': requesters_identity_arn,
-                    'requesters_identity_username': requesters_identity_username,
-                    'event_time': timestamp,
-                    'source_ip_address': data['source_ip_address'],
-                    'event_id': data['event_id'],
-                    'event_name': data['event_name']
-                })
         return honey_tokens
