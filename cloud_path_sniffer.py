@@ -62,6 +62,11 @@ if __name__ == "__main__":
         print(e)
         exit(-1)
 
+    security_controller = Security(session=session, region=region)
+    print("Detected Anomalies:")
+    print(json.dumps(security_controller.detect_anomalies_from_yaml_files(), indent=4))
+    exit()
+
     neo_db = Neo4jDatabase()
     neo_db.delete_all_data()
 
@@ -95,3 +100,4 @@ if __name__ == "__main__":
 
     print("Detected Abnormal Relationship Counts:")
     print(json.dumps(security_controller.find_nodes_with_max_relationship(contains_service_accounts=False), indent=4))
+

@@ -1,3 +1,4 @@
+import glob
 import ipaddress
 import json
 import os
@@ -6,6 +7,7 @@ from datetime import datetime, timedelta
 
 import boto3
 import requests
+import yaml
 from botocore.exceptions import ClientError
 
 from helpers.boto3_helpers import describe_instances
@@ -142,7 +144,7 @@ class Security:
                                                                     LIMIT 20''')
         return possible_role_juggling_paths
 
-    def find_nodes_with_max_relationship(self, contains_service_accounts: False):
+    def find_nodes_with_max_relationship(self, contains_service_accounts=False):
         """
         The nodes that have the most relationships are found using this method.
         :param contains_service_accounts:
@@ -158,7 +160,7 @@ class Security:
                                                                         LIMIT 50;''')
         else:
             nodes_with_max_relationship = self.neo4j_controller.execute_neo4j_cypher('''MATCH (n)
-                                                                        WHERE NOT n.identity CONTAINS "amazonaws.com"
+                                                                        WHERE n.user_identity_type <> "AWSService"
                                                                         WITH n, SIZE([(n)-[]-() | 1]) AS numRelationships
                                                                         WHERE numRelationships > 10
                                                                         RETURN n, numRelationships
@@ -679,3 +681,154 @@ class Security:
         """
         honey_tokens = []
         return honey_tokens
+
+    # ------------------------------------------------------- AUDIT & ANOMALY CHECKS -----------------------------------------------------------------
+    def detect_anomalies_from_yaml_files(self):
+        try:
+            anomalies = []
+            yaml_stream = None
+            files = glob.glob("./anomalies/*.yaml")
+            detailed_condition = []
+            condition = []
+            for file_path in files:
+                with open(file_path, 'r') as stream:
+                    try:
+                        yaml_stream = yaml.safe_load(stream)
+                        if 'description' not in yaml_stream or 'severity' not in yaml_stream or 'where_condition' not in yaml_stream:
+                            pass
+
+                        detailed_condition.append("when {where_condition} then '{audit_description}'".format(
+                            where_condition=yaml_stream['where_condition'],
+                            audit_description=json.dumps({'severity': yaml_stream['severity'], 'description': yaml_stream['description']})))
+
+                        condition.append('({where_condition})'.format(
+                            where_condition=yaml_stream['where_condition']))
+
+                    except yaml.YAMLError as e:
+                        logger.log(e)
+                if yaml_stream is None:
+                    pass
+
+            sql_query = """
+                        SELECT 
+                            case {detailed_condition} end as audit_description,
+                            cast(useridentity as json) as useridentity,
+                            eventname,
+                            sourceipaddress,
+                            useragent,
+                            eventtime,
+                            eventid
+                        FROM 
+                            CredentialMapper 
+                        WHERE 
+                            {condition}""".format(detailed_condition='\n'.join(detailed_condition),
+                                                  condition=' or '.join(condition))
+
+            # ------------------------------------------
+
+            query_response = self.athena_client.start_query_execution(QueryString=sql_query,
+                                                                      ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
+                                                                      QueryExecutionContext={'Database': 'CredentialMapper'}
+                                                                      )
+            query_execution_id = query_response['QueryExecutionId']
+
+            query_response = self.athena_client.get_query_execution(
+                QueryExecutionId=query_execution_id
+            )
+            ready_state = query_response['QueryExecution']['Status']['State']
+
+            timeout = 100
+            while ready_state != 'SUCCEEDED' and timeout > 0:
+                query_response = self.athena_client.get_query_execution(
+                    QueryExecutionId=query_execution_id
+                )
+                ready_state = query_response['QueryExecution']['Status']['State']
+                time.sleep(2)
+                timeout -= 2
+                if timeout <= 0:
+                    raise ClientError
+
+            response = {}
+            is_truncated = False
+            first = True
+            while len(response.keys()) == 0 or is_truncated:
+                if is_truncated is False:
+                    response = self.athena_client.get_query_results(
+                        QueryExecutionId=query_execution_id,
+                        MaxResults=50
+                    )
+                else:
+                    response = self.athena_client.get_query_results(
+                        QueryExecutionId=query_execution_id,
+                        MaxResults=50,
+                        NextToken=response['NextToken']
+                    )
+
+                for trail in response['ResultSet']['Rows']:
+                    if first:
+                        first = False
+                        continue
+
+                    user_identity_dict = trail['Data'][1]['VarCharValue'] if 'VarCharValue' in trail['Data'][1] else ''
+                    user_identity = json.loads(user_identity_dict)
+                    user_identity_type = user_identity['type']
+                    user_identity_principalid = user_identity['principalid']
+                    user_identity_arn = user_identity['arn']
+                    user_identity_accountid = user_identity['accountid']
+                    user_identity_invokedby = user_identity['invokedby']
+                    user_identity_accesskeyid = user_identity['accesskeyid']
+                    user_identity_username = user_identity['username']
+                    user_identity_sessioncontext = user_identity['sessioncontext']
+
+                    identity = ''
+
+                    if user_identity_type == 'IAMUser':
+                        identity = user_identity_accesskeyid
+                    elif user_identity_type == 'AWSService':
+                        identity = user_identity_invokedby
+                    elif user_identity_type == 'AssumedRole':
+                        identity = user_identity_accesskeyid
+                    elif user_identity_type == 'SAMLUser':
+                        identity = user_identity_username
+                    elif user_identity_type == 'AWSAccount':
+                        identity = user_identity_accountid
+                    elif user_identity_type == 'WebIdentityUser':
+                        identity = user_identity_username
+                    elif user_identity_type == 'FederatedUser':
+                        identity = user_identity_principalid[user_identity_principalid.find(':') + 1:]
+                    elif user_identity_type == 'Root':
+                        identity = 'Root'
+
+                    info = trail['Data'][0]['VarCharValue'] if 'VarCharValue' in trail['Data'][0] else ''
+                    info = json.loads(info)
+                    description = info['description']
+                    severity = info['severity']
+                    event_name = trail['Data'][2]['VarCharValue'] if 'VarCharValue' in trail['Data'][2] else ''
+                    source_ip_address = trail['Data'][3]['VarCharValue'] if 'VarCharValue' in trail['Data'][3] else ''
+                    useragent = trail['Data'][4]['VarCharValue'] if 'VarCharValue' in trail['Data'][4] else ''
+                    event_time = trail['Data'][5]['VarCharValue'] if 'VarCharValue' in trail['Data'][5] else ''
+                    event_time = datetime.strptime(event_time, '%Y-%m-%dT%H:%M:%SZ').strftime('%b %d, %Y, %I:%M:%S %p')
+                    event_id = trail['Data'][6]['VarCharValue'] if 'VarCharValue' in trail['Data'][6] else ''
+
+                    anomalies.append({'anomaly_description': description,
+                                      'anomaly_severity': severity,
+                                      'identity': identity,
+                                      'event_name': event_name,
+                                      'source_ip_address': source_ip_address,
+                                      'useragent': useragent,
+                                      'event_time': event_time,
+                                      'event_id': event_id
+                                      })
+                if 'NextToken' in response:
+                    is_truncated = True
+                else:
+                    is_truncated = False
+
+            return anomalies
+
+        except ClientError as err:
+            logger.critical(err)
+            return []
+        except Exception as e:
+            logger.critical(e)
+            return []
