@@ -132,10 +132,13 @@ class CredentialMapper:
                         # user_identity_sessioncontext = user_identity['sessioncontext']
 
                         identity = ''
-                        invoked_by = ''
 
                         if user_identity_type == 'IAMUser':
                             identity = user_identity_accesskeyid
+                            if user_identity_accesskeyid.startswith('ASIA'):
+                                user_identity_type = 'AssumedRole'
+                            elif user_identity_accesskeyid.startswith('AKIA'):
+                                user_identity_type = 'AccessKeyId'
                         elif user_identity_type == 'AWSService':
                             identity = user_identity_invokedby
                         elif user_identity_type == 'AssumedRole':
@@ -171,10 +174,10 @@ class CredentialMapper:
                         """
 
                         all_temporary_credentials.append({'user_identity_type': user_identity_type, 'requesters_identity': identity})
-                        owner_node = driver_session.execute_write(neo_db.create_or_update_node,
-                                                                  label=user_identity_type,
-                                                                  identity=identity,
-                                                                  user_identity_type=user_identity_type)
+                        driver_session.execute_write(neo_db.create_or_update_node,
+                                                     label=user_identity_type,
+                                                     identity=identity,
+                                                     user_identity_type=user_identity_type)
 
                     if 'NextToken' in response:
                         is_truncated = True
@@ -193,6 +196,7 @@ class CredentialMapper:
 
     def get_all_relationship_of_credentials(self):
         logger.debug("[+] Starting get_all_relationship_of_credentials.")
+
         def check_long_term_access_key_status(userName, accessKey):
             status = 'Deleted'
             accessKeys = get_access_key_of_user(session=self.session, userName=userName)
@@ -297,14 +301,7 @@ class CredentialMapper:
                     if user_identity_type == 'IAMUser':
                         requesters_identity = user_identity_accesskeyid
                     elif user_identity_type == 'AWSService':
-                        if 'amazonaws.com' in user_identity_invokedby:
-                            if 'roleSessionName' in json.loads(data['request_parameters']):
-                                requesters_identity = json.loads(data['request_parameters'])['roleSessionName']
-                            else:
-                                requesters_identity = 'Unknown'
-                            service_name = user_identity_invokedby
-                        else:
-                            requesters_identity = user_identity_invokedby
+                        requesters_identity = user_identity_invokedby
                     elif user_identity_type == 'AssumedRole':
                         requesters_identity = user_identity_accesskeyid
                     elif user_identity_type == 'SAMLUser':
@@ -346,7 +343,7 @@ class CredentialMapper:
                         else:
                             assumed_role_arn = data['assumed_role_arn'].replace('"', '')
                             if user_identity_type == 'FederatedUser':
-                                requesters_identity = service_name + ':' + requesters_identity
+                                requesters_identity = requesters_identity + ':' + json.loads(data['request_parameters'])['roleSessionName']
                         timestamp = datetime.strptime(data['event_time'], '%Y-%m-%dT%H:%M:%SZ').strftime('%b %d, %Y, %I:%M:%S %p')
                         all_temporary_credentials.append({'user_identity_type': user_identity_type,
                                                           'requesters_identity': requesters_identity,
@@ -562,7 +559,7 @@ class CredentialMapper:
                     end_node = session.write_transaction(self.neo4j_controller.create_or_update_node,
                                                          label='AssumedRole',
                                                          identity=crawled_credential['access_key_id'],
-                                                         user_identity_type='IAMAccessKeyId',
+                                                         user_identity_type='AssumedRole',
                                                          access_key_id=crawled_credential['access_key_id'],
                                                          expiration_time=crawled_credential['expiration_time'],
                                                          assumed_role_arn=crawled_credential['assumed_role_arn'],

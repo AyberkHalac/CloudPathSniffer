@@ -1,0 +1,5 @@
+where_condition: eventName = 'GetUser' and (LOWER(requestparameters) like '%admin%' or LOWER(errormessage) like '%admin%')
+
+description: Denied GetUser request to the high privileged user.
+
+severity: High

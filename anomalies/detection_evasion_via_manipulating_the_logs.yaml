@@ -1,0 +1,5 @@
+where_condition: eventname='StopLogging' or eventname='DeleteTrail' or eventname='PutEventSelectors' or eventname='PutBucketLifecycle' or eventname='LeaveOrganization' or eventname='DeleteAlarms' or eventname='DisableAlarmActions' or eventname='DeleteFlowLogs'
+
+description: Logging process manipulation for evade the detection.
+
+severity: Critical

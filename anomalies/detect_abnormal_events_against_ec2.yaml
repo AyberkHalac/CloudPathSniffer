@@ -1,0 +1,5 @@
+where_condition: eventname='GetPasswordData' or eventname='ListSecrets' or eventname='GetSecretValue'
+
+description: Detect abnormal events against the EC2 instance user.
+
+severity: Critical
