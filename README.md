@@ -48,6 +48,8 @@ graph database alongside your credentials, resulting in a holistic defense strat
 - Finds anomalies in the log records, which includes the generation of temporary credentials and the creation of access
   keys.
 
+#### For blacklist IP's, CloudPathSniffer uses: https://raw.githubusercontent.com/stamparm/ipsum/master/ipsum.txt
+
 ### TODO
 
 - Develop frontend to visualise the credential path graph. (If you want to view your data then you can
