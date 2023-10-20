@@ -1,4 +1,8 @@
-# CloudPathSniffer
+<div align="center">
+<img width="450px" src="https://github.com/AyberkHalac/CloudPathSniffer/assets/9082447/23a0ed48-9aa6-43bd-ab8a-9b1670eb15ee">
+</div>
+
+<hr>
 
 <div align="center">
  <a href="https://www.linkedin.com/in/ayberkhalac/">
@@ -7,14 +11,14 @@
  <a href="https://github.com/ayberkhalac/CloudPathSniffer/issues">
     <img src="https://img.shields.io/github/issues/ayberkhalac/CloudPathSniffer">
  </a>
- <a href="https://github.com/ayberkhalac/CloudPathSniffer">
+ <a href="https://github.com/AyberkHalac/CloudPathSniffer/stargazers">
     <img src="https://img.shields.io/github/stars/ayberkhalac/CloudPathSniffer?color=red&style=flat-square">
  </a>
 </div>
 
 # Introduction
 
-<img src="https://pbs.twimg.com/profile_images/882639407748046849/lc0tYBlW_400x400.jpg">
+<img src="https://pbs.twimg.com/profile_images/882639407748046849/lc0tYBlW_400x400.jpg" width="150px">
 
 <b>This project will be presented at BlackHat Europe 2023 ARSENAL.</b>
 
@@ -43,6 +47,8 @@ graph database alongside your credentials, resulting in a holistic defense strat
   used outside of the EC2 instance.
 - Finds anomalies in the log records, which includes the generation of temporary credentials and the creation of access
   keys.
+
+#### For blacklist IP's, CloudPathSniffer uses: https://raw.githubusercontent.com/stamparm/ipsum/master/ipsum.txt
 
 ### TODO
 
