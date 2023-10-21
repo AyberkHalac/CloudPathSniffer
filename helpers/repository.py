@@ -109,11 +109,21 @@ class Neo4jDatabase:
             return result.single()
 
     @staticmethod
-    def create_relationship(tx, start_node, relationship_type, end_node, **properties):
+    def create_or_merge_relationship(tx, start_node, relationship_type, end_node, **properties):
         query = (
             f"MATCH (startNode), (endNode) "
             f"WHERE id(startNode) = $start_id AND id(endNode) = $end_id "
             f"MERGE (startNode)-[rel:{relationship_type}]->(endNode) "
+            f"SET rel += $properties"
+        )
+        tx.run(query, start_id=start_node[0].id, end_id=end_node[0].id, properties=properties)
+
+    @staticmethod
+    def create_without_merge_relationship(tx, start_node, relationship_type, end_node, **properties):
+        query = (
+            f"MATCH (startNode), (endNode) "
+            f"WHERE id(startNode) = $start_id AND id(endNode) = $end_id "
+            f"CREATE (startNode)-[rel:{relationship_type}]->(endNode) "
             f"SET rel += $properties"
         )
         tx.run(query, start_id=start_node[0].id, end_id=end_node[0].id, properties=properties)

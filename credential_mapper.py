@@ -494,7 +494,7 @@ class CredentialMapper:
                                                                        user_identity_type='IAMAccessKeyId'
                                                                        )
 
-                        driver_session.write_transaction(self.neo4j_controller.create_relationship,
+                        driver_session.write_transaction(self.neo4j_controller.create_or_merge_relationship,
                                                          owner_node,
                                                          'Owns',
                                                          access_key_node
@@ -529,7 +529,7 @@ class CredentialMapper:
                                                          is_active=crawled_credential['is_active'])
 
                     # Create Relationship
-                    session.write_transaction(self.neo4j_controller.create_relationship,
+                    session.write_transaction(self.neo4j_controller.create_or_merge_relationship,
                                               start_node,
                                               crawled_credential['event_name'],
                                               end_node,
@@ -566,7 +566,7 @@ class CredentialMapper:
                                                          requested_role=crawled_credential['requested_role'],
                                                          is_active=crawled_credential['is_active'])
 
-                    session.write_transaction(self.neo4j_controller.create_relationship,
+                    session.write_transaction(self.neo4j_controller.create_or_merge_relationship,
                                               start_node,
                                               crawled_credential['event_name'],
                                               end_node,
@@ -580,7 +580,7 @@ class CredentialMapper:
                                                                               label='RequestedNode',
                                                                               identity=crawled_credential['requested_role'])
 
-                        session.write_transaction(self.neo4j_controller.create_relationship,
+                        session.write_transaction(self.neo4j_controller.create_or_merge_relationship,
                                                   end_node,
                                                   'FederationRoleRequest',
                                                   requested_suspicious_node,
@@ -614,7 +614,7 @@ class CredentialMapper:
                 )
 
                 # Create Relationship
-                session.write_transaction(self.neo4j_controller.create_relationship,
+                session.write_transaction(self.neo4j_controller.create_without_merge_relationship,
                                           start_node,
                                           'SuspiciousConsoleLogin',
                                           end_node,
@@ -633,7 +633,7 @@ class CredentialMapper:
         with self.neo4j_controller.driver.session() as session:
             for anomaly in anomalies:
                 node = self.neo4j_controller.get_node_by_identity(anomaly['identity'])
-                session.write_transaction(self.neo4j_controller.create_relationship,
+                session.write_transaction(self.neo4j_controller.create_without_merge_relationship,
                                           node,
                                           'Suspicious' + anomaly['event_name'] + 'Request',
                                           node,
@@ -650,7 +650,7 @@ class CredentialMapper:
         with self.neo4j_controller.driver.session() as session:
             for role_juggling_path in role_juggling_paths:
                 node = self.neo4j_controller.get_node_by_identity(role_juggling_path['attack_owner'])
-                session.write_transaction(self.neo4j_controller.create_relationship,
+                session.write_transaction(self.neo4j_controller.create_without_merge_relationship,
                                           node,
                                           'SuspiciousRoleJugglingAttackOnChildPaths',
                                           node,
