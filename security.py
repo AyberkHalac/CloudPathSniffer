@@ -139,6 +139,128 @@ class Security:
                                                                                 ''')
         return possible_role_juggling_paths
 
+    def detect_anonymous_access(self):
+        try:
+            anonymous_access = []
+            sql_query = """SELECT DISTINCT 
+                            cast(useridentity as json) as useridentity,
+                            eventname,
+                            sourceipaddress,
+                            useragent,
+                            eventtime,
+                            eventid,
+                            errorcode,
+                            errormessage
+                        FROM 
+                            CredentialMapper 
+                        WHERE useridentity.accountid = 'anonymous'"""
+
+            query_response = self.athena_client.start_query_execution(QueryString=sql_query,
+                                                                      ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
+                                                                      QueryExecutionContext={'Database': 'CredentialMapper'}
+                                                                      )
+            query_execution_id = query_response['QueryExecutionId']
+
+            query_response = self.athena_client.get_query_execution(
+                QueryExecutionId=query_execution_id
+            )
+            ready_state = query_response['QueryExecution']['Status']['State']
+
+            timeout = 100
+            while ready_state != 'SUCCEEDED' and timeout > 0:
+                query_response = self.athena_client.get_query_execution(
+                    QueryExecutionId=query_execution_id
+                )
+                ready_state = query_response['QueryExecution']['Status']['State']
+                time.sleep(2)
+                timeout -= 2
+                if timeout <= 0:
+                    raise ClientError
+
+            response = {}
+            is_truncated = False
+            first = True
+            while len(response.keys()) == 0 or is_truncated:
+                if is_truncated is False:
+                    response = self.athena_client.get_query_results(
+                        QueryExecutionId=query_execution_id,
+                        MaxResults=50
+                    )
+                else:
+                    response = self.athena_client.get_query_results(
+                        QueryExecutionId=query_execution_id,
+                        MaxResults=50,
+                        NextToken=response['NextToken']
+                    )
+
+                for trail in response['ResultSet']['Rows']:
+                    if first:
+                        first = False
+                        continue
+
+                    user_identity_dict = trail['Data'][0]['VarCharValue'] if 'VarCharValue' in trail['Data'][0] else ''
+                    user_identity = json.loads(user_identity_dict)
+                    user_identity_type = user_identity['type']
+                    user_identity_principalid = user_identity['principalid']
+                    user_identity_arn = user_identity['arn']
+                    user_identity_accountid = user_identity['accountid']
+                    user_identity_invokedby = user_identity['invokedby']
+                    user_identity_accesskeyid = user_identity['accesskeyid']
+                    user_identity_username = user_identity['username']
+                    user_identity_sessioncontext = user_identity['sessioncontext']
+
+                    identity = ''
+
+                    if user_identity_type == 'IAMUser':
+                        identity = user_identity_accesskeyid
+                    elif user_identity_type == 'AWSService':
+                        identity = user_identity_invokedby
+                    elif user_identity_type == 'AssumedRole':
+                        identity = user_identity_accesskeyid
+                    elif user_identity_type == 'SAMLUser':
+                        identity = user_identity_username
+                    elif user_identity_type == 'AWSAccount':
+                        identity = user_identity_accountid
+                    elif user_identity_type == 'WebIdentityUser':
+                        identity = user_identity_username
+                    elif user_identity_type == 'FederatedUser':
+                        identity = user_identity_principalid[user_identity_principalid.find(':') + 1:]
+                    elif user_identity_type == 'Root':
+                        identity = 'Root'
+
+                    event_name = trail['Data'][1]['VarCharValue'] if 'VarCharValue' in trail['Data'][1] else ''
+                    source_ip_address = trail['Data'][2]['VarCharValue'] if 'VarCharValue' in trail['Data'][2] else ''
+                    useragent = trail['Data'][3]['VarCharValue'] if 'VarCharValue' in trail['Data'][3] else ''
+                    event_time = trail['Data'][4]['VarCharValue'] if 'VarCharValue' in trail['Data'][4] else ''
+                    event_time = datetime.strptime(event_time, '%Y-%m-%dT%H:%M:%SZ').strftime('%b %d, %Y, %I:%M:%S %p')
+                    event_id = trail['Data'][5]['VarCharValue'] if 'VarCharValue' in trail['Data'][5] else ''
+                    error_code = trail['Data'][6]['VarCharValue'] if 'VarCharValue' in trail['Data'][6] else ''
+                    error_message = trail['Data'][7]['VarCharValue'] if 'VarCharValue' in trail['Data'][7] else ''
+
+                    anonymous_access.append({'identity': identity,
+                                             'event_name': event_name,
+                                             'source_ip_address': source_ip_address,
+                                             'useragent': useragent,
+                                             'event_time': event_time,
+                                             'event_id': event_id,
+                                             'error_code': error_code,
+                                             'error_message': error_message
+                                             })
+                if 'NextToken' in response:
+                    is_truncated = True
+                else:
+                    is_truncated = False
+            return anonymous_access
+        except ClientError as err:
+            logger.critical(err)
+            print('[!] Exception while the running Athena.')
+            exit(1)
+
+        except Exception as e:
+            logger.critical(e)
+            print('[!] Exception while the running Athena.')
+            exit(1)
+
     def find_nodes_with_max_relationship(self, contains_service_accounts=False):
         """
         The nodes that have the most relationships are found using this method.
@@ -677,7 +799,6 @@ class Security:
         honey_tokens = []
         return honey_tokens
 
-    # ------------------------------------------------------- AUDIT & ANOMALY CHECKS -----------------------------------------------------------------
     def detect_anomalies_from_yaml_files(self):
         try:
             anomalies = []

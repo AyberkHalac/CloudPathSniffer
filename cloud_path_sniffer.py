@@ -104,6 +104,9 @@ if __name__ == "__main__":
     print("Detected Abnormal Relationship Counts:")
     print(json.dumps(security_controller.find_nodes_with_max_relationship(contains_service_accounts=False), indent=4))
 
+    print("Detected Anonymous Access:")
+    print(json.dumps(security_controller.detect_anonymous_access(), indent=4))
+
     print("Detected Anomalies:")
     anomalies = security_controller.detect_anomalies_from_yaml_files()
     if len(anomalies) > 0:
