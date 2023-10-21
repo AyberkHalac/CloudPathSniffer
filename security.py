@@ -129,13 +129,14 @@ class Security:
     def find_longest_unique_paths(self):
         # This query gives the longest unique paths
         possible_role_juggling_paths = self.neo4j_controller.execute_neo4j_cypher('''
-        MATCH p=(parent)-[r*]->(child)
-        WHERE NOT EXISTS((child)-->())
-        and NOT EXISTS(()-[:AssumeRole|AssumeRoleWithSAML|CreateAccessKey|FederationRoleRequest|GetFederationToken]->(parent))
-        and length(p)>6
-        RETURN p, length(p)
-        ORDER BY length(p) DESC
-        LIMIT 20''')
+                                                                                    MATCH p=(parent)-[r*]->(child)
+                                                                                    WHERE NOT EXISTS((child)-->())
+                                                                                    and NOT EXISTS(()-[]->(parent))
+                                                                                    and length(p)>6
+                                                                                    RETURN p, length(p)
+                                                                                    ORDER BY length(p) DESC
+                                                                                    LIMIT 20
+                                                                                ''')
         return possible_role_juggling_paths
 
     def find_nodes_with_max_relationship(self, contains_service_accounts=False):
