@@ -2,7 +2,7 @@ import argparse
 import json
 import os
 
-from credential_crawler import CredentialMapper
+from credential_mapper import CredentialMapper
 from helpers.boto3_helpers import heartbeat, create_boto3_session
 from helpers.config_reader import get_config_file
 from helpers.logger import setup_logger
@@ -62,23 +62,34 @@ if __name__ == "__main__":
         print(e)
         exit(-1)
 
+    # # # INITIALIZE NEO4J # # #
+
     neo_db = Neo4jDatabase()
     neo_db.delete_all_data()
 
     # # # ADD CREDENTIALS TO THE NEO4J # # #
+
     credential_mapper = CredentialMapper(session=session)
+
     nodes = credential_mapper.add_all_credentials_to_neo4j()
     credentials = credential_mapper.get_all_relationship_of_credentials()
     credential_mapper.bulk_add_credentials(credentials)
     credential_mapper.collect_and_fix_ownerless_credentials()
 
     # # # SECURITY CONTROLS # # #
+
     security_controller = Security(session=session, region=region)
+
+    print("Detected Role Juggling Attack Path:")
+    role_juggling_attack_results = security_controller.detect_role_juggling_long_repeating_patterns()
+    if len(role_juggling_attack_results) > 0:
+        credential_mapper.add_role_juggling_attack_to_the_neo4j(role_juggling_attack_results)
+    print(json.dumps(role_juggling_attack_results, indent=4))
 
     print("Illegal Console Logins from Access Keys:")
     console_logins = security_controller.detect_suspicious_console_login_of_iam_credentials()
     if len(console_logins) > 0:
-        credential_mapper.add_console_login_of_iam_credentials(console_logins)
+        credential_mapper.add_console_login_of_iam_credentials_to_neo4j(console_logins)
     print(json.dumps(console_logins, indent=4))
 
     print("Exposed EC2 temporary credentials which are accessed from outside of the AWS IPs:")
@@ -90,11 +101,11 @@ if __name__ == "__main__":
     print("Accesses from Blacklisted IP:")
     print(json.dumps(security_controller.detect_blacklisted_ip_accesses(), indent=4))
 
-    print("Detected Role Juggling Attack Path:")
-    print(json.dumps(security_controller.detect_role_juggling_long_repeating_patterns(), indent=4))
-
     print("Detected Abnormal Relationship Counts:")
     print(json.dumps(security_controller.find_nodes_with_max_relationship(contains_service_accounts=False), indent=4))
 
     print("Detected Anomalies:")
-    print(json.dumps(security_controller.detect_anomalies_from_yaml_files(), indent=4))
+    anomalies = security_controller.detect_anomalies_from_yaml_files()
+    if len(anomalies) > 0:
+        credential_mapper.add_anomalies_to_the_neo4j(anomalies)
+    print(json.dumps(anomalies, indent=4))

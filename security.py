@@ -108,9 +108,10 @@ class Security:
 
         longest_unique_paths = self.find_longest_unique_paths()
 
-        array_of_identity_list = []
+        pattern_list = []
         for path in longest_unique_paths:
             identity_list = []
+            node_identity = []
             for node in path['p']:
                 if 'user_identity_type' not in node:
                     continue
@@ -118,30 +119,24 @@ class Security:
                     identity_list.append(node['requested_role'])
                 else:
                     identity_list.append(node['identity'])
-
-            array_of_identity_list.append(identity_list)
-
-        pattern_list = []
-        for identity_list in array_of_identity_list:
+                node_identity.append(node['identity'])
             pattern, start_index, end_index = find_repeating_pattern_info(identity_list)
-
             if pattern:
-                print("Repeating Pattern:", ' -> '.join(pattern))
-                print("Start Index:", start_index)
-                print("End Index:", end_index)
-                pattern_list.append({'pattern': pattern, 'start_index': start_index, 'end_index': end_index})
+                pattern_list.append({'attack_start_node': node_identity[start_index], 'attack_end_node': node_identity[end_index], 'pattern': pattern, 'start_index': start_index, 'end_index': end_index, 'attack_owner': node_identity[0]})
 
         return pattern_list
 
     def find_longest_unique_paths(self):
         # This query gives the longest unique paths
-        possible_role_juggling_paths = self.neo4j_controller.execute_neo4j_cypher('''MATCH p=(parent)-[r*]->(child)
-                                                                    WHERE NOT EXISTS((child)-->())
-                                                                        and NOT EXISTS(()-[:AssumeRole|CreateAccessKey]->(parent))
-                                                                        and length(p)>6
-                                                                    RETURN p
-                                                                    ORDER BY length(p) DESC
-                                                                    LIMIT 20''')
+        possible_role_juggling_paths = self.neo4j_controller.execute_neo4j_cypher('''
+                                                                                    MATCH p=(parent)-[r*]->(child)
+                                                                                    WHERE NOT EXISTS((child)-->())
+                                                                                    and NOT EXISTS(()-[]->(parent))
+                                                                                    and length(p)>6
+                                                                                    RETURN p, length(p)
+                                                                                    ORDER BY length(p) DESC
+                                                                                    LIMIT 20
+                                                                                ''')
         return possible_role_juggling_paths
 
     def find_nodes_with_max_relationship(self, contains_service_accounts=False):

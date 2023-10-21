@@ -589,7 +589,7 @@ class CredentialMapper:
                                                   event_name=crawled_credential['event_name'],
                                                   event_time=crawled_credential['event_time'])
 
-    def add_console_login_of_iam_credentials(self, console_login_data_list):
+    def add_console_login_of_iam_credentials_to_neo4j(self, console_login_data_list):
         with self.neo4j_controller.driver.session() as session:
             for console_login_data in console_login_data_list:
                 # Credential Start Node
@@ -622,4 +622,42 @@ class CredentialMapper:
                                           event_id=console_login_data['event_id'],
                                           event_name=console_login_data['event_name'],
                                           event_time=console_login_data['event_time']
+                                          )
+
+    def add_anomalies_to_the_neo4j(self, anomalies):
+        """
+        For now, I'm connecting all nodes to itself.
+        :param anomalies:
+        :return:
+        """
+        with self.neo4j_controller.driver.session() as session:
+            for anomaly in anomalies:
+                node = self.neo4j_controller.get_node_by_identity(anomaly['identity'])
+                session.write_transaction(self.neo4j_controller.create_relationship,
+                                          node,
+                                          'Suspicious' + anomaly['event_name'] + 'Request',
+                                          node,
+                                          anomaly_description=anomaly['anomaly_description'],
+                                          anomaly_severity=anomaly['anomaly_severity'],
+                                          event_name=anomaly['event_name'],
+                                          source_ip_address=anomaly['source_ip_address'],
+                                          useragent=anomaly['useragent'],
+                                          event_time=anomaly['event_time'],
+                                          event_id=anomaly['event_id']
+                                          )
+
+    def add_role_juggling_attack_to_the_neo4j(self, role_juggling_paths):
+        with self.neo4j_controller.driver.session() as session:
+            for role_juggling_path in role_juggling_paths:
+                node = self.neo4j_controller.get_node_by_identity(role_juggling_path['attack_owner'])
+                session.write_transaction(self.neo4j_controller.create_relationship,
+                                          node,
+                                          'SuspiciousRoleJugglingAttackOnChildPaths',
+                                          node,
+                                          attack_owner=role_juggling_path['attack_owner'],
+                                          attack_start_node=role_juggling_path['attack_start_node'],
+                                          attack_end_node=role_juggling_path['attack_end_node'],
+                                          pattern=role_juggling_path['pattern'],
+                                          start_index=role_juggling_path['start_index'],
+                                          end_index=role_juggling_path['end_index']
                                           )

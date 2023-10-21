@@ -31,6 +31,14 @@ class Neo4jDatabase:
         with self.driver.session() as session:
             session.execute_write(self._delete_all_data)
 
+    def get_node_by_identity(self, identity):
+        with self.driver.session() as session:
+            result = session.run(
+                "MATCH (node {identity: $identity}) RETURN node",
+                identity=identity
+            )
+            return result.single()
+
     @staticmethod
     def _delete_all_data(tx):
         # Cypher query to delete all nodes and relationships
