@@ -127,8 +127,8 @@ def get_access_key_of_user(session: boto3.Session, userName):
                 access_keys.append(access_key)
         return access_keys
     except Exception as e:
-        logger.critical(e)
-        raise
+        logger.debug('#0001 - ' + str(e) + ' - username:' + userName)
+        return []
 
 
 def list_users(session: boto3.Session):
@@ -147,13 +147,13 @@ def list_users(session: boto3.Session):
         raise
 
 
-def get_user(session: boto3.Session, userName):
+def get_user(session: boto3.Session, username):
     try:
         iam_client = session.client('iam')
-        user = iam_client.get_user(UserName=userName)
+        user = iam_client.get_user(UserName=username)
         return user['User']
-    except ClientError as err:
-        logger.critical(err)
+    except ClientError as e:
+        logger.debug('#0002 - ' + str(e) + ' - username:' + username)
         return False
 
 
@@ -162,8 +162,8 @@ def get_long_term_credentials(session: boto3.Session):
         long_term_credentials = []
         users = list_users(session)
         for user in users:
-            userName = user['UserName']
-            access_keys = get_access_key_of_user(session, userName)
+            username = user['UserName']
+            access_keys = get_access_key_of_user(session, username)
             for access_key in access_keys:
                 long_term_credentials.append({'username': access_key['UserName'],
                                               'access_key_id': access_key['AccessKeyId'],

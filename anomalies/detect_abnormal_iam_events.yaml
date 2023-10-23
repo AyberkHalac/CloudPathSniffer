@@ -1,0 +1,6 @@
+where_condition: eventname='DeactivateMFADevice' or eventname='ResyncMFADevice'
+
+description: Detect CreateUser and AssumeRole event logs of the EC2 instance user.
+
+severity: Critical
+

@@ -32,8 +32,7 @@ def is_ip_in_ec2_range(ip_address):
                     is_aws_ip = True
                     break
             except ValueError as e:
-                logger.critical(e)
-                return True
+                pass
     return is_aws_ip
 
 
@@ -271,7 +270,7 @@ class Security:
         if contains_service_accounts:
             nodes_with_max_relationship = self.neo4j_controller.execute_neo4j_cypher('''MATCH (n)
                                                                         WITH n, SIZE([(n)-[]-() | 1]) AS numRelationships
-                                                                        WHERE numRelationships > 20
+                                                                        WHERE numRelationships > 50
                                                                         RETURN n, numRelationships
                                                                         ORDER BY numRelationships DESC
                                                                         LIMIT 50;''')
@@ -279,7 +278,7 @@ class Security:
             nodes_with_max_relationship = self.neo4j_controller.execute_neo4j_cypher('''MATCH (n)
                                                                         WHERE n.user_identity_type <> "AWSService"
                                                                         WITH n, SIZE([(n)-[]-() | 1]) AS numRelationships
-                                                                        WHERE numRelationships > 10
+                                                                        WHERE numRelationships > 20
                                                                         RETURN n, numRelationships
                                                                         ORDER BY numRelationships DESC
                                                                         LIMIT 50;''')
@@ -504,7 +503,8 @@ class Security:
                             FROM 
                                 CredentialMapper 
                             WHERE 
-                                useridentity.principalId like '%:i-%'
+                                sourceipaddress != 'AWS Internal'
+                                and useridentity.principalId like '%:i-%'
                                 and eventtime > '{event_time}' 
                                 ORDER BY eventtime DESC""".format(event_time=datetime_object)
 
@@ -689,7 +689,7 @@ class Security:
                 errorcode is NULL
                 and useridentity.type='FederatedUser'
                 and eventname = 'ConsoleLogin'
-                and eventtime > '2023-07-07T14:55:21Z'
+                and eventtime > '{event_time}'
             ORDER BY eventtime ASC
         """.format(event_time=datetime_object)
 
@@ -825,6 +825,8 @@ class Security:
                 if yaml_stream is None:
                     pass
 
+            start_time = datetime.utcnow() - timedelta(days=self.all_temporary_credentials_timespan['days'], hours=self.all_temporary_credentials_timespan['hours'], minutes=self.all_temporary_credentials_timespan['minutes'])
+            datetime_object = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S.%f").strftime("%Y-%m-%dT%H:%M:%SZ")
             sql_query = """
                         SELECT 
                             case {detailed_condition} end as audit_description,
@@ -837,8 +839,7 @@ class Security:
                         FROM 
                             CredentialMapper 
                         WHERE 
-                            {condition}""".format(detailed_condition='\n'.join(detailed_condition),
-                                                  condition=' or '.join(condition))
+                            ({condition}) and eventtime > '{event_time}' """.format(detailed_condition='\n'.join(detailed_condition), condition=' or '.join(condition), event_time=datetime_object)
 
             # ------------------------------------------
 
@@ -948,3 +949,194 @@ class Security:
         except Exception as e:
             logger.critical(e)
             return []
+
+    # # # PRIVILEGE ESCALATION # # #
+
+
+class PrivilegeEscalation:
+
+    def __init__(self, session, region):
+
+        self.session = session
+        self.region = region
+        self.athena_client = self.session.client(service_name='athena', region_name=self.region)
+        self.neo4j_controller = Neo4jDatabase()
+        try:
+            config = get_config_file('./config.yaml')
+            self.all_temporary_credentials_timespan = config['all_temporary_credentials']
+        except Exception as e:
+            logger.critical('[!] Getting error reading config file', str(e))
+            return
+
+        self.bucket_name = config['bucket_name']
+        self.region = region
+
+    def check_privilege_escalation_scenarios(self):
+        try:
+            privilege_escalation_scenarios = []
+            # If error code is not none then its denied + it won't be "possible attack" but "possible attempted attack"
+            event_names_lead_privesc = ['CreateUser', 'CreateLoginProfile']
+            # 'CreateLoginProfile', 'UpdateLoginProfile', 'UpdateAccessKey', 'CreateServiceSpecificCredential', 'ResetServiceSpecificCredential', 'AttachUserPolicy', 'AttachGroupPolicy', 'AttachRolePolicy'
+            start_time = datetime.utcnow() - timedelta(days=self.all_temporary_credentials_timespan['days'], hours=self.all_temporary_credentials_timespan['hours'], minutes=self.all_temporary_credentials_timespan['minutes'])
+            datetime_object = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S.%f").strftime("%Y-%m-%dT%H:%M:%SZ")
+            sql_query = """SELECT 
+                            cast(useridentity as json) as useridentity,
+                            eventname,
+                            sourceipaddress,
+                            useragent,
+                            eventtime,
+                            eventid,
+                            requestparameters,
+                            responseelements,
+                            errorcode,
+                            errormessage
+                        FROM 
+                            CredentialMapper 
+                        WHERE 
+                            errorcode is null 
+                            and eventname in {event_names_lead_privesc}
+                            and eventtime > '{event_time}' """.format(event_time=datetime_object, event_names_lead_privesc=tuple(event_names_lead_privesc))
+
+            # ------------------------------------------
+
+            query_response = self.athena_client.start_query_execution(QueryString=sql_query,
+                                                                      ResultConfiguration={'OutputLocation': f's3://{self.bucket_name}/CredentialMapper/'},
+                                                                      QueryExecutionContext={'Database': 'CredentialMapper'}
+                                                                      )
+            query_execution_id = query_response['QueryExecutionId']
+
+            query_response = self.athena_client.get_query_execution(
+                QueryExecutionId=query_execution_id
+            )
+            ready_state = query_response['QueryExecution']['Status']['State']
+
+            timeout = 100
+            while ready_state != 'SUCCEEDED' and timeout > 0:
+                query_response = self.athena_client.get_query_execution(
+                    QueryExecutionId=query_execution_id
+                )
+                ready_state = query_response['QueryExecution']['Status']['State']
+                time.sleep(2)
+                timeout -= 2
+                if timeout <= 0:
+                    raise ClientError
+
+            response = {}
+            is_truncated = False
+            first = True
+            while len(response.keys()) == 0 or is_truncated:
+                if is_truncated is False:
+                    response = self.athena_client.get_query_results(
+                        QueryExecutionId=query_execution_id,
+                        MaxResults=50
+                    )
+                else:
+                    response = self.athena_client.get_query_results(
+                        QueryExecutionId=query_execution_id,
+                        MaxResults=50,
+                        NextToken=response['NextToken']
+                    )
+
+                for trail in response['ResultSet']['Rows']:
+                    if first:
+                        first = False
+                        continue
+
+                    user_identity_dict = trail['Data'][0]['VarCharValue'] if 'VarCharValue' in trail['Data'][0] else ''
+                    user_identity = json.loads(user_identity_dict)
+                    user_identity_type = user_identity['type']
+                    user_identity_principalid = user_identity['principalid']
+                    user_identity_arn = user_identity['arn']
+                    user_identity_accountid = user_identity['accountid']
+                    user_identity_invokedby = user_identity['invokedby']
+                    user_identity_accesskeyid = user_identity['accesskeyid']
+                    user_identity_username = user_identity['username']
+                    user_identity_sessioncontext = user_identity['sessioncontext']
+
+                    identity = ''
+
+                    if user_identity_type == 'IAMUser':
+                        identity = user_identity_accesskeyid
+                    elif user_identity_type == 'AWSService':
+                        identity = user_identity_invokedby
+                    elif user_identity_type == 'AssumedRole':
+                        identity = user_identity_accesskeyid
+                    elif user_identity_type == 'SAMLUser':
+                        identity = user_identity_username
+                    elif user_identity_type == 'AWSAccount':
+                        identity = user_identity_accountid
+                    elif user_identity_type == 'WebIdentityUser':
+                        identity = user_identity_username
+                    elif user_identity_type == 'FederatedUser':
+                        identity = user_identity_principalid[user_identity_principalid.find(':') + 1:]
+                    elif user_identity_type == 'Root':
+                        identity = 'Root'
+
+                    event_name = trail['Data'][1]['VarCharValue'] if 'VarCharValue' in trail['Data'][1] else ''
+                    source_ip_address = trail['Data'][2]['VarCharValue'] if 'VarCharValue' in trail['Data'][2] else ''
+                    useragent = trail['Data'][3]['VarCharValue'] if 'VarCharValue' in trail['Data'][3] else ''
+                    event_time = trail['Data'][4]['VarCharValue'] if 'VarCharValue' in trail['Data'][4] else ''
+                    event_time = datetime.strptime(event_time, '%Y-%m-%dT%H:%M:%SZ').strftime('%b %d, %Y, %I:%M:%S %p')
+                    event_id = trail['Data'][5]['VarCharValue'] if 'VarCharValue' in trail['Data'][5] else ''
+                    request_parameters = trail['Data'][6]['VarCharValue'] if 'VarCharValue' in trail['Data'][6] else ''
+                    response_elements = trail['Data'][7]['VarCharValue'] if 'VarCharValue' in trail['Data'][7] else ''
+                    error_code = trail['Data'][8]['VarCharValue'] if 'VarCharValue' in trail['Data'][8] else ''
+                    error_message = trail['Data'][9]['VarCharValue'] if 'VarCharValue' in trail['Data'][9] else ''
+
+                    getattr(self, 'check_' + event_name.lower())({
+                        'attackers_identity': identity,
+                        'event_name': event_name,
+                        'source_ip_address': source_ip_address,
+                        'useragent': useragent,
+                        'event_time': event_time,
+                        'event_id': event_id,
+                        'request_parameters': request_parameters,
+                        'response_elements': response_elements,
+                        'error_code': error_code,
+                        'error_message': error_message
+                    })
+
+                    privilege_escalation_scenarios.append({
+                        'attackers_identity': identity,
+                        'event_name': event_name,
+                        'source_ip_address': source_ip_address,
+                        'useragent': useragent,
+                        'event_time': event_time,
+                        'event_id': event_id,
+                        'request_parameters': request_parameters,
+                        'response_elements': response_elements,
+                        'error_code': error_code,
+                        'error_message': error_message
+                    })
+
+                if 'NextToken' in response:
+                    is_truncated = True
+                else:
+                    is_truncated = False
+
+            return privilege_escalation_scenarios
+
+        except ClientError as err:
+            logger.critical(err)
+            return []
+        except Exception as e:
+            logger.critical(e)
+            return []
+
+    def check_createuser(self, event):
+        start_node = self.neo4j_controller.get_node_by_identity(event['attackers_identity'])
+        end_node = self.neo4j_controller.get_node_by_identity(json.loads(event['request_parameters'])['userName'])
+        with self.neo4j_controller.driver.session() as driver_session:
+            driver_session.write_transaction(self.neo4j_controller.create_or_merge_relationship,
+                                             start_node,
+                                             event['event_name'],
+                                             end_node,
+                                             event_name=event['event_name'],
+                                             event_time=event['event_time'],
+                                             source_ip_address=event['source_ip_address'],
+                                             useragent=event['useragent'],
+                                             event_id=event['event_id'],
+                                             )
+
+    def check_createloginprofile(self, event):
+        print(event)

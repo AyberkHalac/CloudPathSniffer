@@ -1,4 +1,4 @@
-where_condition: useridentity.arn like '%i-%' and (eventName='CreateUser' or eventname='AssumeRole' or eventname='CreateKeyPair')
+where_condition: useridentity.arn like '%i-%' and (eventname='CreateUser' or eventname='AssumeRole' or eventname='CreateKeyPair')
 
 description: Detect CreateUser and AssumeRole event logs of the EC2 instance user.
 
