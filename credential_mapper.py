@@ -26,7 +26,7 @@ class CredentialMapper:
             self.cloudtrail_client = self.session.client('cloudtrail')
             self.athena_client = self.session.client('athena')
             config = get_config_file('./config.yaml')
-            self.all_temporary_credentials_timespan = config['all_temporary_credentials']
+            self.timespan_timespan = config['timespan']
             self.bucket_name = config['bucket_name']
             self.users = list_users(session=self.session)
             prepare_athena(self.athena_client, config['bucket_name'], self.session.client('sts').get_caller_identity()['Account'])
@@ -67,8 +67,8 @@ class CredentialMapper:
         try:
             neo_db = Neo4jDatabase()
             with neo_db.driver.session() as driver_session:
-                all_temporary_credentials = []
-                start_time = datetime.utcnow() - timedelta(days=self.all_temporary_credentials_timespan['days'], hours=self.all_temporary_credentials_timespan['hours'], minutes=self.all_temporary_credentials_timespan['minutes'])
+                timespan = []
+                start_time = datetime.utcnow() - timedelta(days=self.timespan_timespan['days'], hours=self.timespan_timespan['hours'], minutes=self.timespan_timespan['minutes'])
                 datetime_object = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S.%f").strftime("%Y-%m-%dT%H:%M:%SZ")
                 sql_query = """SELECT DISTINCT cast(useridentity as json) as useridentity
                                     FROM CredentialMapper 
@@ -175,7 +175,7 @@ class CredentialMapper:
                         <novalue>           - the attribute is not found
                         """
 
-                        all_temporary_credentials.append({'user_identity_type': user_identity_type, 'requesters_identity': identity})
+                        timespan.append({'user_identity_type': user_identity_type, 'requesters_identity': identity})
                         driver_session.execute_write(neo_db.create_or_update_node,
                                                      label=user_identity_type,
                                                      identity=identity,
@@ -185,7 +185,7 @@ class CredentialMapper:
                         is_truncated = True
                     else:
                         is_truncated = False
-            return all_temporary_credentials
+            return timespan
         except ClientError as err:
             logger.critical("#0005 - " + str(err))
             exit(1)
@@ -212,8 +212,8 @@ class CredentialMapper:
 
         try:
             added_users = {}
-            all_temporary_credentials = []
-            start_time = datetime.utcnow() - timedelta(days=self.all_temporary_credentials_timespan['days'], hours=self.all_temporary_credentials_timespan['hours'], minutes=self.all_temporary_credentials_timespan['minutes'])
+            timespan = []
+            start_time = datetime.utcnow() - timedelta(days=self.timespan_timespan['days'], hours=self.timespan_timespan['hours'], minutes=self.timespan_timespan['minutes'])
             datetime_object = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S.%f").strftime("%Y-%m-%dT%H:%M:%SZ")
             sql_query = """SELECT  
                             cast(useridentity as json) as useridentity,
@@ -414,7 +414,7 @@ class CredentialMapper:
                             added_users[user['UserName']] = []
                         added_users[user['UserName']].append(access_key)
 
-            return all_temporary_credentials
+            return timespan
         except ClientError as err:
             logger.critical("#0004 - " + str(err))
             exit(1)

@@ -94,7 +94,7 @@ bucket_name: {Type the Cloudtrail bucket name here.}
 
 
 # How many days do you want to go back
-all_temporary_credentials:
+timespan:
   days: (Cloudtrail can save your logs for a maximum of 90 days)
   hours: 0
   minutes: 0

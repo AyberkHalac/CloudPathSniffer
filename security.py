@@ -45,7 +45,7 @@ class Security:
         self.neo4j_controller = Neo4jDatabase()
         try:
             config = get_config_file('./config.yaml')
-            self.all_temporary_credentials_timespan = config['all_temporary_credentials']
+            self.timespan_timespan = config['timespan']
         except Exception as e:
             logger.critical('[!] Getting error reading config file', str(e))
             return
@@ -675,7 +675,7 @@ class Security:
         """
         console_logins = []
 
-        start_time = datetime.utcnow() - timedelta(days=self.all_temporary_credentials_timespan['days'], hours=self.all_temporary_credentials_timespan['hours'], minutes=self.all_temporary_credentials_timespan['minutes'])
+        start_time = datetime.utcnow() - timedelta(days=self.timespan_timespan['days'], hours=self.timespan_timespan['hours'], minutes=self.timespan_timespan['minutes'])
         datetime_object = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S.%f").strftime("%Y-%m-%dT%H:%M:%SZ")
         sql_query = """
         SELECT  
@@ -825,7 +825,7 @@ class Security:
                 if yaml_stream is None:
                     pass
 
-            start_time = datetime.utcnow() - timedelta(days=self.all_temporary_credentials_timespan['days'], hours=self.all_temporary_credentials_timespan['hours'], minutes=self.all_temporary_credentials_timespan['minutes'])
+            start_time = datetime.utcnow() - timedelta(days=self.timespan_timespan['days'], hours=self.timespan_timespan['hours'], minutes=self.timespan_timespan['minutes'])
             datetime_object = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S.%f").strftime("%Y-%m-%dT%H:%M:%SZ")
             sql_query = """
                         SELECT 
@@ -963,7 +963,7 @@ class PrivilegeEscalation:
         self.neo4j_controller = Neo4jDatabase()
         try:
             config = get_config_file('./config.yaml')
-            self.all_temporary_credentials_timespan = config['all_temporary_credentials']
+            self.timespan_timespan = config['timespan']
         except Exception as e:
             logger.critical('[!] Getting error reading config file', str(e))
             return
@@ -977,7 +977,7 @@ class PrivilegeEscalation:
             # If error code is not none then its denied + it won't be "possible attack" but "possible attempted attack"
             event_names_lead_privesc = ['CreateUser', 'CreateLoginProfile']
             # 'CreateLoginProfile', 'UpdateLoginProfile', 'UpdateAccessKey', 'CreateServiceSpecificCredential', 'ResetServiceSpecificCredential', 'AttachUserPolicy', 'AttachGroupPolicy', 'AttachRolePolicy'
-            start_time = datetime.utcnow() - timedelta(days=self.all_temporary_credentials_timespan['days'], hours=self.all_temporary_credentials_timespan['hours'], minutes=self.all_temporary_credentials_timespan['minutes'])
+            start_time = datetime.utcnow() - timedelta(days=self.timespan_timespan['days'], hours=self.timespan_timespan['hours'], minutes=self.timespan_timespan['minutes'])
             datetime_object = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S.%f").strftime("%Y-%m-%dT%H:%M:%SZ")
             sql_query = """SELECT 
                             cast(useridentity as json) as useridentity,
