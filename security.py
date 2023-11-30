@@ -975,7 +975,7 @@ class PrivilegeEscalation:
         try:
             privilege_escalation_scenarios = []
             # If error code is not none then its denied + it won't be "possible attack" but "possible attempted attack"
-            event_names_lead_privesc = ['CreateUser', 'CreateLoginProfile']
+            event_names_lead_privesc = ['CreateUser', 'DeleteUser', 'CreateAccessKey', 'DeleteAccessKey' 'CreateLoginProfile']
             # 'CreateLoginProfile', 'UpdateLoginProfile', 'UpdateAccessKey', 'CreateServiceSpecificCredential', 'ResetServiceSpecificCredential', 'AttachUserPolicy', 'AttachGroupPolicy', 'AttachRolePolicy'
             start_time = datetime.utcnow() - timedelta(days=self.timespan_timespan['days'], hours=self.timespan_timespan['hours'], minutes=self.timespan_timespan['minutes'])
             datetime_object = datetime.strptime(str(start_time), "%Y-%m-%d %H:%M:%S.%f").strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1124,19 +1124,94 @@ class PrivilegeEscalation:
             return []
 
     def check_createuser(self, event):
-        start_node = self.neo4j_controller.get_node_by_identity(event['attackers_identity'])
-        end_node = self.neo4j_controller.get_node_by_identity(json.loads(event['request_parameters'])['userName'])
-        with self.neo4j_controller.driver.session() as driver_session:
-            driver_session.write_transaction(self.neo4j_controller.create_or_merge_relationship,
-                                             start_node,
-                                             event['event_name'],
-                                             end_node,
-                                             event_name=event['event_name'],
-                                             event_time=event['event_time'],
-                                             source_ip_address=event['source_ip_address'],
-                                             useragent=event['useragent'],
-                                             event_id=event['event_id'],
-                                             )
+        try:
+            start_node = self.neo4j_controller.get_node_by_identity(event['attackers_identity'])
+            end_node = self.neo4j_controller.get_node_by_identity(json.loads(event['request_parameters'])['userName'])
+            with self.neo4j_controller.driver.session() as driver_session:
+                driver_session.write_transaction(self.neo4j_controller.create_or_merge_relationship,
+                                                 start_node,
+                                                 event['event_name'],
+                                                 end_node,
+                                                 event_name=event['event_name'],
+                                                 event_time=event['event_time'],
+                                                 source_ip_address=event['source_ip_address'],
+                                                 useragent=event['useragent'],
+                                                 event_id=event['event_id'],
+                                                 )
+        except Exception as e:
+            logger.critical(str(e))
+            return None
+
+    def check_deleteuser(self, event):  # Could be None
+        try:
+            start_node = self.neo4j_controller.get_node_by_identity(event['attackers_identity'])
+            end_node = self.neo4j_controller.get_node_by_identity(json.loads(event['request_parameters'])['userName'])
+            with self.neo4j_controller.driver.session() as driver_session:
+                driver_session.write_transaction(self.neo4j_controller.create_or_merge_relationship,
+                                                 start_node,
+                                                 event['event_name'],
+                                                 end_node,
+                                                 event_name=event['event_name'],
+                                                 event_time=event['event_time'],
+                                                 source_ip_address=event['source_ip_address'],
+                                                 useragent=event['useragent'],
+                                                 event_id=event['event_id'],
+                                                 )
+        except Exception as e:
+            logger.critical(str(e))
+            return None
+
+    def check_createaccesskey(self, event):  # Could be None
+        try:
+            start_node = self.neo4j_controller.get_node_by_identity(event['attackers_identity'])
+            end_node = self.neo4j_controller.get_node_by_identity(json.loads(event['response_elements'])['accessKey']['accessKeyId'])
+
+            query = '''MATCH (startNode)-[oldRel:CreateAccessKey]-(endNode {identity:\'''' + json.loads(event['response_elements'])['accessKey']['accessKeyId'] + '''\'})
+                       CREATE (startNode)-[newRel:Owns]->(endNode)
+                       SET newRel = oldRel, newRel.requesters_identity=\'''' + event['attackers_identity'] + '''\'
+                       WITH startNode, endNode, newRel, oldRel
+                       DETACH DELETE oldRel
+                       RETURN startNode, endNode, newRel;'''
+            self.neo4j_controller.execute_neo4j_cypher(query)
+
+            with self.neo4j_controller.driver.session() as driver_session:
+                driver_session.write_transaction(self.neo4j_controller.create_or_merge_relationship,
+                                                 start_node,
+                                                 event['event_name'],
+                                                 end_node,
+                                                 event_name=event['event_name'],
+                                                 event_time=event['event_time'],
+                                                 source_ip_address=event['source_ip_address'],
+                                                 useragent=event['useragent'],
+                                                 event_id=event['event_id'],
+                                                 )
+
+                # Edit old create access key event
+
+
+
+        except Exception as e:
+            logger.critical(str(e))
+            return None
+
+    def check_deleteaccesskey(self, event):
+        try:
+            start_node = self.neo4j_controller.get_node_by_identity(event['attackers_identity'])
+            end_node = self.neo4j_controller.get_node_by_identity(json.loads(event['response_elements'])['accessKey']['accessKeyId'])
+            with self.neo4j_controller.driver.session() as driver_session:
+                driver_session.write_transaction(self.neo4j_controller.create_or_merge_relationship,
+                                                 start_node,
+                                                 event['event_name'],
+                                                 end_node,
+                                                 event_name=event['event_name'],
+                                                 event_time=event['event_time'],
+                                                 source_ip_address=event['source_ip_address'],
+                                                 useragent=event['useragent'],
+                                                 event_id=event['event_id'],
+                                                 )
+        except Exception as e:
+            logger.critical(str(e))
+            return None
 
     def check_createloginprofile(self, event):
         print(event)
